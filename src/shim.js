@@ -9,11 +9,11 @@
     let r;
     try{ r=await fetch(path,Object.assign({credentials:'same-origin',redirect:'manual',cache:'no-store'},opt||{})); }
     catch(e){ throw mkErr('network','Sin conexión con el servidor.'); }
-    if(r.type==='opaqueredirect'||r.status===0) throw mkErr('session','La sesión de acceso venció. Recargue la página para volver a ingresar.');
+    if(r.type==='opaqueredirect'||r.status===0) throw mkErr('session','Su sesión venció. Recargue la página para volver a ingresar.');
     const ct=r.headers.get('content-type')||'';
     let j=null; if(ct.includes('json')) j=await r.json().catch(()=>null);
     if(!r.ok||!j){
-      if(!j&&r.ok) throw mkErr('session','La sesión de acceso venció. Recargue la página para volver a ingresar.');
+      if(!j&&r.ok) throw mkErr('session','Su sesión venció. Recargue la página para volver a ingresar.');
       throw mkErr((j&&j.code)||('http_'+r.status),(j&&j.message)||('Error '+r.status));
     }
     return j;
@@ -111,11 +111,46 @@
     }
   };
 
+  /* ── ingreso con usuario y contraseña ── */
+  function showLogin(){
+    return new Promise(resolve=>{
+      const ov=document.createElement('div');
+      ov.style.cssText='position:fixed;inset:0;z-index:99999;background:#0E0B0A;display:flex;align-items:center;justify-content:center;padding:16px;font-family:Montserrat,Arial,sans-serif;color:#F5F2ED';
+      ov.innerHTML='<form id="dl-lg" style="width:100%;max-width:360px;background:#181311;border:1px solid #33292A;border-radius:16px;padding:28px;display:flex;flex-direction:column;gap:14px;box-shadow:0 20px 60px rgba(0,0,0,.5)">'
+        +'<div style="font-weight:800;font-size:22px;font-style:italic">D&amp;L <span style="color:#7ED321">Hnos. Lozano</span></div>'
+        +'<div style="color:#A59C94;font-size:13px;margin-top:-6px">Ingrese para ver el tablero de clientes.</div>'
+        +'<label style="font-size:12px;color:#A59C94;display:flex;flex-direction:column;gap:6px">Usuario<input id="dl-u" autocomplete="username" autocapitalize="none" required style="padding:12px;border-radius:10px;border:1px solid #33292A;background:#0E0B0A;color:#F5F2ED;font-size:15px"></label>'
+        +'<label style="font-size:12px;color:#A59C94;display:flex;flex-direction:column;gap:6px">Contraseña<input id="dl-p" type="password" autocomplete="current-password" required style="padding:12px;border-radius:10px;border:1px solid #33292A;background:#0E0B0A;color:#F5F2ED;font-size:15px"></label>'
+        +'<div id="dl-e" role="alert" style="color:#ff8a80;font-size:13px;min-height:18px"></div>'
+        +'<button type="submit" style="padding:13px;border:0;border-radius:10px;background:#7ED321;color:#0D0D0D;font-weight:700;font-size:15px;cursor:pointer">Ingresar</button></form>';
+      document.body.appendChild(ov);
+      const f=ov.querySelector('#dl-lg'), er=ov.querySelector('#dl-e'), bt=f.querySelector('button');
+      ov.querySelector('#dl-u').focus();
+      f.addEventListener('submit',async e=>{
+        e.preventDefault(); er.textContent=''; bt.disabled=true; bt.textContent='Verificando…';
+        try{
+          await api('/api/login',J('POST',{user:ov.querySelector('#dl-u').value,pass:ov.querySelector('#dl-p').value}));
+          ov.remove(); resolve();
+        }catch(err){ er.textContent=err.message||'No se pudo ingresar.'; bt.disabled=false; bt.textContent='Ingresar'; }
+      });
+    });
+  }
+  function addLogout(){
+    if(document.getElementById('dl-out')) return;
+    const b=document.createElement('button'); b.id='dl-out'; b.type='button'; b.textContent='Cerrar sesión';
+    b.style.cssText='position:fixed;right:12px;bottom:12px;z-index:9999;padding:7px 12px;border-radius:999px;border:1px solid #33292A;background:#181311;color:#A59C94;font-size:12px;cursor:pointer;opacity:.85';
+    b.onclick=async()=>{ try{ await fetch('/api/logout',{method:'POST',credentials:'same-origin'}); }catch(e){} location.reload(); };
+    document.body.appendChild(b);
+  }
+
   window.claude={
     async use(k){
       if(k==='db'){
-        try{ await api('/api/me'); }
-        catch(e){ window.__DL_ERR=e.message; return null; }
+        try{
+          try{ await api('/api/me'); }
+          catch(e){ if(e.code!=='unauthorized') throw e; await showLogin(); }
+        }catch(e){ window.__DL_ERR=e.message; return null; }
+        addLogout();
         return db;
       }
       if(k==='assets') return assets;
