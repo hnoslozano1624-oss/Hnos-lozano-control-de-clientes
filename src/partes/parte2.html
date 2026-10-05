@@ -1,0 +1,341 @@
+    if(t.hasAttribute('data-close')) return closeModal();
+    if(t.dataset.i!=null && foot.contains(t)){
+      const a=actions[Number(t.dataset.i)];
+      if(a.keep){ a.fn&&a.fn(t); return; }
+      t.disabled=true;
+      try{ const ok=await a.fn(t); if(ok!==false) closeModal(); else t.disabled=false; }
+      catch(err){ t.disabled=false; fail(err); }
+    }
+  };
+  const esc_=e=>{ if(e.key==='Escape') closeModal(); };
+  document.addEventListener('keydown',esc_); modalCleanup=()=>document.removeEventListener('keydown',esc_);
+  if(onMount) onMount(root);
+  const f=$('input,textarea,select',$('#m-body')); if(f && !wide) f.focus();
+}
+function fail(err){
+  const c=err&&err.code, m={quota_exceeded:'Se alcanzó el límite de almacenamiento.',too_large:'El archivo supera el tamaño permitido (20 MB).',unsupported_type:'Tipo de archivo no admitido. Use PDF o imagen (PNG, JPG).',invalid_argument:'No tiene permiso para guardar cambios en este tablero.',not_granted:'No tiene permiso para esta acción.',rate_limited:'Demasiadas acciones seguidas. Intente de nuevo en unos segundos.'};
+  toast(m[c]||('No se pudo guardar. '+((err&&err.message)||'Intente de nuevo.')));
+}
+
+/* ───────── archivos de soporte ───────── */
+async function uploadFile(file){
+  if(!file) return null;
+  if(!S.assets) throw {message:'La carga de archivos no está disponible para su usuario. Use un enlace.'};
+  const r=await S.assets.upload(file);
+  return {fileId:r.id,fileName:file.name,fileType:r.contentType};
+}
+function supportHTML(o){
+  let h='';
+  if(o.link) h+='<a class="sup" href="'+esc(safeUrl(o.link))+'" target="_blank" rel="noopener">Enlace ↗</a>';
+  if(o.fileId){
+    const img=/^image\//.test(o.fileType||'');
+    h+='<a class="sup" href="/_blob/'+esc(o.fileId)+'" target="_blank" rel="noopener">'+(img?'<img src="/_blob/'+esc(o.fileId)+'" alt="">':'')+esc(o.fileName||'Archivo')+' ↗</a>';
+  }
+  return h;
+}
+function supportFields(prefix,o,label){
+  return '<div class="f2"><div class="fld"><label for="'+prefix+'-link">Enlace de soporte (opcional)</label><input class="inp" id="'+prefix+'-link" type="text" placeholder="drive.google.com/…" value="'+esc(o.link||'')+'"></div>'
+   +(S.assets?'<div class="fld"><label for="'+prefix+'-file">'+(label||'Imagen o PDF de soporte')+'</label><input class="inp" id="'+prefix+'-file" type="file" accept="image/*,.pdf,application/pdf">'+(o.fileId?'<span class="hint">Actual: '+esc(o.fileName||'archivo')+' (se reemplaza si elige otro)</span>':'<span class="hint">PDF o imagen, hasta 20 MB.</span>')+'</div>':'<div class="fld"><span class="hint">La carga de archivos no está disponible; use un enlace.</span></div>')
+   +'</div>';
+}
+
+/* ───────── escrituras ───────── */
+const col = n => S.db.collection(n);
+async function saveDoc(name,id,data){ const ref=id?col(name).doc(id):col(name).doc(); await ref.set(data); return ref.id; }
+async function patchDoc(name,id,data){ await col(name).doc(id).update(data); }
+async function delDoc(name,id){ await col(name).doc(id).delete(); }
+const logEntry = (p,text) => (p.log||[]).concat([{at:new Date().toISOString(),text}]);
+
+/* ───────── dibujo principal ───────── */
+function draw(){
+  const app=$('#app');
+  if(S.err){ app.innerHTML=head()+'<div class="welcome"><h3>No se pudo abrir el tablero</h3><p>'+esc(S.err)+'</p></div>'; return; }
+  if(!(S.loaded.c&&S.loaded.t&&S.loaded.p&&S.loaded.e&&S.loaded.s&&S.loaded.q&&S.loaded.r&&S.loaded.k&&S.loaded.g)){ app.innerHTML=head()+'<div class="empty">Cargando clientes…</div>'; return; }
+  if(S.view==='client' && !clientById(S.cid)){ S.view='cli'; S.cid=null; }
+  app.innerHTML = S.view==='client' ? drawClient() : (S.view==='caja' ? drawCaja() : (S.view==='cot' ? drawCot() : (S.view==='prod' ? drawProd() : (S.view==='cli' ? drawClients() : (S.view==='pros' ? drawPros() : drawHome())))));
+}
+function head(right){
+  return '<header class="hero"><img class="hero-logo" src="'+LOGO_H+'" alt="D&amp;L Hnos. Lozano"><div class="hero-r">'+(right||'')+'</div></header>';
+}
+
+const ymOf = x => (x||'').slice(0,7);
+const monthLabel = ym => { const q=ym.split('-').map(Number); return monthName(q[0],q[1]); };
+function weekRange(){ const d=new Date(), off=(d.getDay()+6)%7; const a=new Date(d.getFullYear(),d.getMonth(),d.getDate()-off), z=new Date(a.getFullYear(),a.getMonth(),a.getDate()+6); return [ymd(a),ymd(z)]; }
+function dayLabel(diff,due){ if(diff<0) return 'Vencidas'; if(diff===0) return 'Hoy'; if(diff===1) return 'Mañana'; const t=new Intl.DateTimeFormat('es-CO',{weekday:'long',day:'numeric',month:'short'}).format(parse(due)).replace(/\./g,''); return t.charAt(0).toUpperCase()+t.slice(1); }
+function navTabs(){ const tb=(v,l)=>'<button class="tab" role="tab" aria-selected="'+(S.view===v)+'" data-act="nav" data-v="'+v+'" type="button">'+l+'</button>'; return '<div class="tabs" role="tablist">'+tb('home','Panel general')+tb('cli','Clientes')+tb('caja','Flujo de caja')+tb('pros','Prospección')+tb('cot','Cotizaciones')+tb('prod','Productos')+'</div>'; }
+
+function drawHome(){
+  const t=todayS(), cm=t.slice(0,7);
+  const active=S.clients.filter(c=>c.status!=='cerrado').sort((a,b)=>(a.name||'').localeCompare(b.name||'','es'));
+  const inactive=S.clients.filter(c=>c.status==='cerrado');
+  const isAct=id=>{const c=clientById(id);return c&&c.status!=='cerrado';};
+  const alerts=[]; S.pays.forEach(p=>{ const c=clientById(p.clientId); if(!c||c.status==='cerrado') return; const a=payAlert(p,c); if(a) alerts.push({p,c,a}); });
+  alerts.sort((x,y)=>(x.a.lvl==='bad'?0:1)-(y.a.lvl==='bad'?0:1)||x.a.d-y.a.d);
+  const mesTot=sum(active,c=>stats(c).mes), atrasTot=sum(active,c=>stats(c).atras), futTot=sum(active,c=>stats(c).futuro);
+  const ingresos=sum(S.pays.filter(p=>p.received&&ymOf(p.receivedDate)===cm),p=>p.receivedAmount!=null?p.receivedAmount:p.amount)+sum(S.exps.filter(e=>!isPend(e)&&e.kind==='ingreso'&&ymOf(e.date)===cm),e=>e.amount);
+  const prog=S.pays.filter(p=>ymOf(p.billDate)===cm);
+  const gastos=sum(S.exps.filter(e=>!isPend(e)&&e.kind!=='ingreso'&&e.kind!=='reembolso'&&ymOf(e.date)===cm),e=>e.amount);
+  const porPagar=sum(S.exps.filter(e=>isPend(e)&&e.kind!=='ingreso'&&e.date<=monthEnd()),e=>e.amount);
+  const payAl=S.exps.filter(e=>isPend(e)&&e.date&&e.date<=addDays(t,3)).sort((a,b)=>a.date.localeCompare(b.date));
+  const lateT=S.tasks.filter(x=>isAct(x.clientId)&&!x.done&&x.due&&dayDiff(x.due,t)<0);
+
+  let h=head();
+  h+='<div class="dyl"><div class="dyl-t"><h1>Inteligencia artificial y tecnología a la medida para que tu negocio venda más.</h1><div class="hint" style="margin-top:6px">'+esc(new Intl.DateTimeFormat('es-CO',{weekday:'long',day:'numeric',month:'long',year:'numeric'}).format(new Date()))+'</div></div><img class="dyl-img" src="__DYLIA__" alt="DYLIA, la IA de D&amp;L Hnos. Lozano"></div>'+navTabs();
+
+  if(!S.clients.length){
+    h+='<div class="welcome"><h3>Aún no hay clientes</h3><p>Cree el primer cliente y el tablero arma el plan de trabajo y el calendario de cobro.</p><ol><li>Datos del cliente y alcance del trabajo.</li><li>Entregables, fechas y responsable (Diego o Laura).</li><li>Forma de pago: abonos con saldo a la entrega, o mensualidad.</li></ol><button class="btn pri" data-act="new-client" type="button">Crear primer cliente</button></div>';
+    return h;
+  }
+
+  h+='<section class="stats" aria-label="Clientes">'
+   +stat('Clientes en total',String(S.clients.length),'Registrados en el tablero','')
+   +stat('Activos',String(active.length),'Con trabajo en curso','good')
+   +stat('Inactivos',String(inactive.length),'Trabajo terminado o en pausa','')
+   +stat('Tareas vencidas',String(lateT.length),lateT.length?'Requieren atención hoy':'Todo en fecha',lateT.length?'hot':'')
+   +'</section>';
+  h+='<section class="stats" aria-label="Dinero del mes">'
+   +stat('Ingresos de '+monthLabel(cm).split(' ')[0].toLowerCase(),money(ingresos),'Cobrado en el mes · '+prog.length+' '+plural(prog.length,'cobro programado','cobros programados'),'good')
+   +stat('Cuentas por cobrar',money(mesTot),(atrasTot?'Pago pendiente de clientes; incluye '+money(atrasTot)+' vencido. ':'Pago pendiente de clientes. ')+'A futuro: '+money(futTot),atrasTot?'warm':'')
+   +stat('Cuentas por pagar',money(gastos+porPagar),'Pagado '+money(gastos)+' · Falta pagar '+money(porPagar),porPagar?'warm':'')
+   +stat('Balance del mes',money(ingresos-gastos),'Ingresos cobrados menos gastos',ingresos-gastos<0?'hot':'good')
+   +'</section>';
+
+  /* prioridades de la semana */
+  const [ws,we]=weekRange();
+  let wk=S.tasks.filter(x=>isAct(x.clientId)&&!x.done&&x.due&&x.due<=we);
+  const cntL=wk.filter(x=>x.owner==='Laura').length, cntD=wk.filter(x=>x.owner==='Diego').length;
+  if(S.prio!=='todos') wk=wk.filter(x=>x.owner===S.prio);
+  wk.sort((a,b)=>a.due.localeCompare(b.due)||(a.title||'').localeCompare(b.title||'','es'));
+  h+='<section class="panel" style="margin-bottom:16px"><div class="panel-h" style="flex-wrap:wrap"><div><h2>Prioridades de la semana</h2><div class="hint" style="margin-top:3px">Semana del '+fmtD(ws)+' al '+fmtD(we)+'. Primero lo vencido, después lo que entregamos pronto.</div></div>'
+   +'<div class="svc"><button type="button" data-act="prio" data-o="todos" aria-pressed="'+(S.prio==='todos')+'">Todos</button><button type="button" data-act="prio" data-o="Laura" aria-pressed="'+(S.prio==='Laura')+'">Laura · '+cntL+'</button><button type="button" data-act="prio" data-o="Diego" aria-pressed="'+(S.prio==='Diego')+'">Diego · '+cntD+'</button></div></div>';
+  if(!wk.length) h+='<div class="empty">No hay entregas vencidas ni programadas para esta semana'+(S.prio!=='todos'?' a nombre de '+S.prio:'')+'.</div>';
+  else {
+    let last='';
+    wk.forEach(x=>{ const c=clientById(x.clientId), d=dayDiff(x.due,t), lab=dayLabel(d,x.due);
+      if(lab!==last){ last=lab; h+='<div class="day '+(d<0?'bad':(d<=1?'warn':''))+'">'+esc(lab)+(d<0?'':'')+'</div>'; }
+      h+='<div class="row click" data-act="open-client" data-id="'+esc(c.id)+'" data-tab="seg" tabindex="0"><span class="stripe '+(d<=0?'bad':(d===1?'warn':'info'))+'"></span>'+logoHTML(c,'sm')+'<div class="r-main"><div class="r-title">'+esc(x.title)+'</div><div class="r-sub">'+esc(c.name)+(d<0?' · pactada el '+fmtD(x.due):'')+'</div></div><div class="r-end">'+ownerPill(x.owner)+'<div style="margin-top:4px">'+(d<0?'<span class="pill bad">Atrasada '+(-d)+' '+plural(-d,'día','días')+'</span>':(d===0?'<span class="pill bad">Entregar hoy</span>':(d===1?'<span class="pill warn">Entregar mañana</span>':'<span class="pill">'+fmtD(x.due)+'</span>')))+'</div></div></div>';
+    });
+  }
+  h+='</section>';
+
+  /* pagos del mes + avisos */
+  const mp=S.pays.filter(p=>{ const c=clientById(p.clientId); if(!c) return false; return ymOf(p.billDate)===cm||(!p.received&&p.billDate<cm+'-01')||(p.received&&ymOf(p.receivedDate)===cm); }).sort((a,b)=>(a.billDate||'').localeCompare(b.billDate||''));
+  h+='<div class="cols"><section class="panel"><div class="panel-h"><h2>Cobros del mes</h2><span class="hint">'+mp.filter(p=>p.received).length+' de '+mp.length+' cobrados</span></div><div class="list">';
+  if(!mp.length) h+='<div class="empty">No hay cobros programados este mes.</div>';
+  mp.slice(0,12).forEach(p=>{ const c=clientById(p.clientId);
+    h+='<div class="row click" data-act="open-client" data-id="'+esc(c.id)+'" data-tab="pay" tabindex="0">'+logoHTML(c,'sm')+'<div class="r-main"><div class="r-title">'+esc(c.name)+' · '+esc(p.label)+'</div><div class="r-sub">Facturar '+fmtD(p.billDate)+(p.dueDate?' · pago esperado '+fmtD(p.dueDate):'')+'</div></div><div class="r-end"><div class="num" style="font-weight:700">'+money(p.amount)+'</div>'+payPill(p,c)+'</div></div>';
+  });
+  if(mp.length>12) h+='<div class="hint" style="padding-top:8px">y '+(mp.length-12)+' más. Revíselos dentro de cada cliente.</div>';
+  h+='</div></section>';
+
+  h+='<section class="panel"><div class="panel-h"><h2>Avisos de cobro y pago</h2><span class="hint">Requieren acción</span></div><div class="list">';
+  if(!alerts.length&&!payAl.length) h+='<div class="empty">Sin facturas por emitir, cobros atrasados ni pagos por vencer. Los avisos aparecen según los días de anticipación de cada cliente.</div>';
+  payAl.slice(0,4).forEach(e=>{ const d=dayDiff(e.date,t), lv=d<0?'bad':'warn';
+    h+='<div class="row click" data-act="nav" data-v="caja" tabindex="0"><span class="stripe '+lv+'"></span><span class="logo sm ini" aria-hidden="true">$</span><div class="r-main"><div class="r-title">Pagar · '+esc(e.payee||e.concept||'Pago pendiente')+'</div><div class="r-sub">'+esc(e.concept||'')+' · vence '+fmtD(e.date)+'</div></div><div class="r-end"><div class="num" style="font-weight:700">'+money(e.amount)+'</div><span class="pill '+lv+'">'+(d<0?'Pago vencido hace '+(-d)+' '+plural(-d,'día','días'):(d===0?'Pagar hoy':'Pagar en '+d+' '+plural(d,'día','días')))+'</span></div></div>'; });
+  alerts.slice(0,10).forEach(x=>{
+    h+='<div class="row click" data-act="open-client" data-id="'+esc(x.c.id)+'" data-tab="pay" tabindex="0"><span class="stripe '+x.a.lvl+'"></span>'+logoHTML(x.c,'sm')+'<div class="r-main"><div class="r-title">'+esc(x.c.name)+' · '+esc(x.p.label)+'</div><div class="r-sub">'+(x.a.kind==='bill'?'Fecha de factura '+fmtD(x.p.billDate):'Pago esperado '+fmtD(x.p.dueDate))+'</div></div><div class="r-end"><div class="num" style="font-weight:700">'+money(x.p.amount)+'</div><span class="pill '+x.a.lvl+'">'+esc(x.a.text)+'</span></div></div>';
+  });
+  h+='</div></section></div>';
+
+  return h;
+}
+
+
+function clientCard(c){
+  const s=stats(c); return '<button class="card" data-act="open-client" data-id="'+esc(c.id)+'" data-tab="seg" type="button"><div style="display:flex;justify-content:space-between;gap:10px;align-items:center"><div style="display:flex;gap:12px;align-items:center;min-width:0">'+logoHTML(c)+'<div class="name">'+esc(c.name)+'</div></div><span class="pill '+(c.status==='cerrado'?'':(c.payMode==='mensual'?'info':'ok'))+'">'+(c.status==='cerrado'?'Inactivo':(c.payMode==='mensual'?'Mensual':'Abonos'))+'</span></div>'
+     +'<div class="chips">'+(c.services||[]).map(k=>'<span class="chip">'+esc((SERVICES[k]||{}).label||k)+'</span>').join('')+'</div>'
+     +'<div><div class="kv"><span>Avance</span><span>'+s.done+' de '+s.all+' tareas</span></div><div class="bar" style="margin-top:6px"><i style="width:'+s.pct+'%"></i></div></div>'
+     +'<div class="kv"><span>Próxima factura</span><span>'+(s.nextBill?fmtD(s.nextBill.billDate)+' · '+money(s.nextBill.amount):(s.nextPay?'Facturada, sin cobrar':'Sin pendientes'))+'</span></div>'
+     +'<div class="kv"><span>Cuentas por cobrar</span><span class="num">'+money(s.mes)+'</span></div>'
+     +((s.late||s.alerts.length)?'<div class="chips">'+(s.late?'<span class="pill bad">'+s.late+' '+plural(s.late,'tarea vencida','tareas vencidas')+'</span>':'')+(s.alerts.length?'<span class="pill '+(s.alerts.some(a=>a.lvl==='bad')?'bad':'warn')+'">'+s.alerts.length+' '+plural(s.alerts.length,'aviso de cobro','avisos de cobro')+'</span>':'')+'</div>':'')
+     +'</button>';
+}
+function drawClients(){
+  const all=S.clients.slice().sort((a,b)=>(a.name||'').localeCompare(b.name||'','es'));
+  const act=all.filter(c=>c.status!=='cerrado'), ina=all.filter(c=>c.status==='cerrado');
+  const f=S.cfilter||'activo', list=f==='activo'?act:(f==='inactivo'?ina:all);
+  let h=head('<button class="btn pri" data-act="new-client" type="button">+ Nuevo cliente</button>');
+  h+='<div style="margin-bottom:6px"><h1>Clientes</h1><div class="hint" style="margin-top:4px">Entre a cada cliente para ver su seguimiento, pagos, trabajo ejecutado y ficha.</div></div>'+navTabs();
+  if(!all.length) return h+'<div class="welcome"><h3>Aún no hay clientes</h3><p>Cree el primer cliente y el tablero arma el plan de trabajo y el calendario de cobro.</p><button class="btn pri" data-act="new-client" type="button">Crear primer cliente</button></div>';
+  const fb=(k,l,n)=>'<button type="button" data-act="cfilter" data-f="'+k+'" aria-pressed="'+(f===k)+'">'+l+' · '+n+'</button>';
+  h+='<div class="svc" style="margin-bottom:16px">'+fb('activo','Activos',act.length)+fb('inactivo','Inactivos',ina.length)+fb('todos','Todos',all.length)+'</div>';
+  h+='<div class="grid">'+list.map(clientCard).join('')+'</div>';
+  if(!list.length) h+='<div class="empty">No hay clientes '+(f==='activo'?'activos':'inactivos')+'.</div>';
+  return h;
+}
+
+/* ───────── gastos y pagos del equipo ───────── */
+const EXP_KIND={laura:'Pago a Laura',diego:'Pago a Diego',otro:'Otro gasto',ingreso:'Otra entrada de dinero',reembolso:'Reembolso a un socio'};
+const SRC_LABEL={caja:'Flujo de caja D&L',laura:'Bolsillo de Laura',diego:'Bolsillo de Diego'};
+const EXP_CATS=['Pauta digital (Meta, Google, TikTok)','Plataformas y software','Medios y proveedores','Herramientas y software','Publicidad','Impuestos','Transporte','Otro'];
+const isPend = e => e.status==='pendiente';
+const expLabel = e => e.kind==='reembolso'?'Reembolso a '+(e.socio==='diego'?'Diego':'Laura'):(e.kind==='otro'||!e.kind?(e.cat||'Otro gasto'):EXP_KIND[e.kind]);
+const srcPill = (src,known) => src==='laura'||src==='diego'?'<span class="pill warn" title="Pagado con dinero personal; no descontó de la caja">De bolsillo de '+(src==='laura'?'Laura':'Diego')+'</span>':(known?'':'<span class="pill bad" title="Edite el pago e indique de dónde salió">Origen sin definir</span>');
+const isIn = e => e.kind==='ingreso';
+function ledgerData(){
+  const st=S.caja||{}, from=st.fecha||'', L=[];
+  S.pays.forEach(p=>{ if(!p.received||!p.receivedDate) return; const c=clientById(p.clientId);
+    L.push({dir:'in',date:p.receivedDate,amount:p.receivedAmount!=null?p.receivedAmount:p.amount,concept:(c?c.name:'Cliente')+' · '+p.label,type:'Cobro de cliente',kind:'cobro',clientId:p.clientId,ref:'p',id:p.id,ts:p.createdAt||''}); });
+  S.exps.forEach(e=>{ if(isPend(e)||!e.date) return;
+    L.push({dir:isIn(e)?'in':'out',date:e.date,amount:e.amount,concept:(e.payee?e.payee+(e.concept?' · '+e.concept:''):(e.concept||expLabel(e))),type:isIn(e)?'Otra entrada':expLabel(e),kind:e.kind||'otro',clientId:e.clientId,ref:'e',id:e.id,ts:e.createdAt||'',sup:e,src:e.source,personal:(!isIn(e)&&(e.source==='laura'||e.source==='diego'))?e.source:null}); });
+  const F=L.sort((a,b)=>a.date.localeCompare(b.date)||a.ts.localeCompare(b.ts));
+  let bal=Number(st.saldo)||0; F.forEach(x=>{ if(x.date>=from){ if(!x.personal) bal+=x.dir==='in'?x.amount:-x.amount; x.bal=bal; } else x.bal=null; });
+  return {L:F,open:Number(st.saldo)||0};
+}
+function expPill(e,t){ const d=dayDiff(e.date,t); return d<0?'<span class="pill bad">Vencido hace '+(-d)+' '+plural(-d,'día','días')+'</span>':(d===0?'<span class="pill warn">Vence hoy</span>':(d<=3?'<span class="pill warn">Vence en '+d+' '+plural(d,'día','días')+'</span>':'<span class="pill">Vence '+fmtD(e.date)+'</span>')); }
+function cajaForm(){
+  const st=S.caja||{};
+  openModal({title:'Saldo inicial de caja',
+    body:'<p class="hint" style="margin:0">Indique cuánto dinero había disponible (bancos y efectivo) en una fecha. La caja se calcula desde ahí sumando las entradas y restando las salidas registradas.</p><div class="f2"><div class="fld"><label for="cj-amt">Saldo en caja (COP)</label><input class="inp num" id="cj-amt" inputmode="numeric" value="'+grp(st.saldo||0)+'"></div><div class="fld"><label for="cj-date">Saldo al día</label><input class="inp" id="cj-date" type="date" value="'+esc(st.fecha||todayS().slice(0,4)+'-09-01')+'"></div></div><p class="hint" style="margin:0">Los movimientos anteriores a esa fecha se muestran, pero no se suman a la caja. Si empieza a registrar desde septiembre, use el 1 de septiembre.</p>',
+    onMount:()=>{ $('#cj-amt').addEventListener('change',e=>{ e.target.value=grp(num(e.target.value)); }); },
+    actions:[{label:'Cancelar',fn:()=>true},{label:'Guardar',kind:'pri',fn:async()=>{ await S.db.collection('settings').doc('caja').set({saldo:num($('#cj-amt').value),fecha:$('#cj-date').value||todayS()}); toast('Saldo inicial guardado'); }}]});
+}
+function recCandidates(m){
+  const q=m.split('-').map(Number), pm=ymd(new Date(q[0],q[1]-2,1)).slice(0,7);
+  const key=e=>(e.payee||'')+'|'+(e.concept||'')+'|'+(e.cat||'')+'|'+(e.kind||'');
+  const have=new Set(S.exps.filter(e=>ymOf(e.date)===m).map(key));
+  return S.exps.filter(e=>e.rec&&!isIn(e)&&ymOf(e.date)===pm&&!have.has(key(e)));
+}
+async function copyRecurring(m){
+  const q=m.split('-').map(Number), dim=new Date(q[0],q[1],0).getDate(); let n=0;
+  for(const e of recCandidates(m)){ const day=Math.min(Number((e.date||'').slice(8,10))||1,dim);
+    await saveDoc('expenses',null,{kind:e.kind||'otro',amount:e.amount,status:'pendiente',date:q[0]+'-'+pad(q[1])+'-'+pad(day),clientId:e.clientId||'',concept:e.concept||'',payee:e.payee||'',cat:e.cat||'',rec:true,createdAt:new Date().toISOString()}); n++; }
+  toast(n?n+' '+plural(n,'pago recurrente agregado','pagos recurrentes agregados')+' a la proyección':'No hay pagos recurrentes por traer');
+}
+function drawCaja(){
+  const t=todayS(), cm=t.slice(0,7); if(!S.gMonth) S.gMonth=cm; const m=S.gMonth;
+  const {L,open}=ledgerData(), st=S.caja;
+  const cashAt=d=>{ let b=open; L.forEach(x=>{ if(x.bal!=null&&x.date<=d) b=x.bal; }); return b; };
+  const mq=m.split('-').map(Number), mStart=m+'-01', mEnd=ymd(new Date(mq[0],mq[1],0));
+  const cajaHoy=cashAt(t), future=m>=cm;
+  const cobrar=S.pays.filter(p=>!p.received&&p.billDate<=mEnd&&clientById(p.clientId)).sort((a,b)=>(a.billDate||'').localeCompare(b.billDate||''));
+  const proj=S.exps.filter(e=>!isIn(e)&&(ymOf(e.date)===m||(isPend(e)&&e.date<mStart&&future))).sort((a,b)=>(a.date||'').localeCompare(b.date||''));
+  const projPend=proj.filter(isPend), projPaid=proj.filter(e=>!isPend(e));
+  const cobrarM=sum(cobrar,p=>p.amount), pagarM=sum(projPend,e=>e.amount);
+  const mIn=L.filter(x=>x.dir==='in'&&ymOf(x.date)===m), mOutAll=L.filter(x=>x.dir==='out'&&ymOf(x.date)===m);
+  const mOut=mOutAll.filter(x=>!x.personal), mPers=mOutAll.filter(x=>x.personal);
+  const inT=sum(mIn,x=>x.amount), outT=sum(mOut,x=>x.amount);
+  const pL=sum(mPers.filter(x=>x.personal==='laura'),x=>x.amount), pD=sum(mPers.filter(x=>x.personal==='diego'),x=>x.amount);
+  const sinOrigen=S.exps.filter(e=>!isPend(e)&&!isIn(e)&&e.kind!=='reembolso'&&!e.source).length;
+  const tl=sum(mOut.filter(x=>x.kind==='laura'),x=>x.amount), td=sum(mOut.filter(x=>x.kind==='diego'),x=>x.amount);
+  const proyCierre=future?cajaHoy+cobrarM-pagarM:cashAt(mEnd);
+  let h=head('<button class="btn pri" data-act="add-exp" type="button">+ Registrar entrada o salida</button>');
+  h+='<div style="margin-bottom:6px"><h1>Flujo de caja</h1><div class="hint" style="margin-top:4px">Cuánto hay en caja, cuánto entra y cuánto sale. Los pagos al equipo son parte de las salidas.</div></div>'+navTabs();
+
+  h+='<div class="toolbar"><div style="display:flex;gap:8px;align-items:center"><button class="btn sm" data-act="g-prev" type="button" aria-label="Mes anterior">←</button><h3 style="min-width:150px;text-align:center">'+esc(monthLabel(m))+'</h3><button class="btn sm" data-act="g-next" type="button" aria-label="Mes siguiente">→</button></div>'+(m!==cm?'<button class="link" data-act="g-now" type="button">Ir al mes actual</button>':'')+(m!==cm.slice(0,4)+'-09'&&cm>cm.slice(0,4)+'-09'?'<button class="link" data-act="g-sep" type="button">Ir a septiembre</button>':'')+'<button class="link" data-act="edit-caja" type="button">'+(st?'Ajustar saldo inicial':'Registrar saldo inicial')+'</button></div>';
+
+  h+='<section class="stats" aria-label="Caja del mes">'
+   +stat('Caja hoy',money(cajaHoy),st?'Saldo inicial '+money(open)+' al '+fmtD(st.fecha):'Registre el saldo inicial para que coincida con el banco',cajaHoy<0?'hot':'good')
+   +stat('Entradas de '+monthLabel(m).split(' ')[0].toLowerCase(),money(inT),'Recibido · por cobrar '+money(cobrarM),'good')
+   +stat('Salidas de caja en '+monthLabel(m).split(' ')[0].toLowerCase(),money(outT),'Pagado de caja · por pagar '+money(pagarM),projPend.some(e=>e.date<t)?'hot':'')
+   +stat(future?'Caja proyectada al cierre':'Caja al cierre',money(proyCierre),future?'Si se cobra y se paga todo lo pendiente':'Saldo al final de '+monthLabel(m).split(' ')[0].toLowerCase(),proyCierre<0?'hot':'')
+   +'</section>';
+  h+='<div class="hint" style="margin:-8px 0 22px">Pagos al equipo del mes: Laura '+money(tl)+' · Diego '+money(td)+'. Flujo neto de caja: <b style="color:var(--fg)">'+money(inT-outT)+'</b>.'+((pL||pD)?' Pagado de bolsillo (no sale de caja): Laura '+money(pL)+' · Diego '+money(pD)+'.':'')+'</div>';
+  if(sinOrigen) h+='<div class="panel" style="margin-bottom:18px;border-color:var(--warn)"><b style="color:var(--warn)">'+sinOrigen+' '+plural(sinOrigen,'pago registrado sin origen definido','pagos registrados sin origen definido')+'.</b> <span class="hint">Edítelos e indique si salieron de la caja de D&amp;L o del bolsillo de Laura o Diego, para que la caja sea correcta.</span></div>';
+
+  /* proyección de pagos */
+  const cand=recCandidates(m);
+  h+='<div class="toolbar"><div><h2>'+(m<cm?'Pagos de ':'Proyección de pagos de ')+esc(monthLabel(m).split(' ')[0].toLowerCase())+'</h2><div class="hint" style="margin-top:3px">'+(m<cm?'Registre lo que se pagó en este mes a plataformas, pauta, medios, proveedores y equipo.':'Plataformas, pauta, medios, proveedores y equipo. Lo proyectado pasa a salida cuando lo marca como pagado.')+'</div></div><span style="display:flex;gap:8px;flex-wrap:wrap">'+(cand.length?'<button class="btn sm" data-act="rec-copy" type="button">Traer '+cand.length+' '+plural(cand.length,'recurrente','recurrentes')+' del mes anterior</button>':'')+'<button class="btn sm pri" data-act="add-proj" type="button">'+(m<cm?'+ Registrar pago de '+esc(monthLabel(m).split(' ')[0].toLowerCase()):'+ Agregar a la proyección')+'</button></span></div>';
+  if(!proj.length) h+='<div class="empty">'+(m<cm?'Aún no hay pagos registrados en este mes. Use el botón para registrar lo que se pagó.':'Aún no hay pagos proyectados para este mes. Agregue las plataformas y pautas que paga')+(m>=cm&&cand.length?' o traiga los recurrentes del mes anterior.':(m>=cm?'.':''))+'</div>';
+  else { h+='<div class="tbl-wrap" style="margin-bottom:22px"><table><thead><tr><th>Plataforma o concepto</th><th>Categoría</th><th>Cliente</th><th>Fecha</th><th>Valor</th><th>Estado</th><th></th></tr></thead><tbody>';
+    proj.forEach(e=>{ const c=e.clientId?clientById(e.clientId):null, pend=isPend(e);
+      h+='<tr><td style="min-width:200px;font-weight:600">'+esc(e.payee||e.concept||'—')+(e.rec?' <span class="pill info" title="Se repite cada mes">Mensual</span>':'')+(!pend&&(e.source==='laura'||e.source==='diego')?' '+srcPill(e.source,true):'')+(e.payee&&e.concept?'<div class="r-sub">'+esc(e.concept)+'</div>':'')+'</td><td><span class="pill '+(e.kind==='laura'?'laura':(e.kind==='diego'?'diego':''))+'">'+esc(expLabel(e))+'</span></td><td>'+esc(c?c.name:'General')+'</td><td class="num">'+fmtD(e.date)+'</td><td class="num" style="font-weight:700">'+money(e.amount)+'</td><td>'+(pend?expPill(e,t):'<span class="pill ok">Pagado</span>')+'</td><td style="white-space:nowrap;text-align:right">'+(pend?'<button class="btn sm pri" data-act="pay-exp" data-id="'+esc(e.id)+'" type="button">Marcar pagado</button> ':'')+'<button class="link" data-act="edit-exp" data-id="'+esc(e.id)+'" type="button">Editar</button></td></tr>'; });
+    h+='<tr style="background:var(--surface-2)"><td colspan="4" style="font-weight:800">'+(m<cm?'Total pagado y registrado':'Total proyectado')+'</td><td class="num" style="font-weight:800">'+money(sum(proj,e=>e.amount))+'</td><td colspan="2" class="hint">Pagado '+money(sum(projPaid,e=>e.amount))+' · Falta '+money(pagarM)+'</td></tr>';
+    h+='</tbody></table></div>'; }
+
+  /* cuentas con los socios */
+  const socios=['laura','diego'].map(k=>{ const g=sum(S.exps.filter(e=>!isPend(e)&&!isIn(e)&&e.kind!=='reembolso'&&e.source===k),e=>e.amount), r=sum(S.exps.filter(e=>!isPend(e)&&e.kind==='reembolso'&&e.socio===k),e=>e.amount); return {k,g,r,sd:g-r}; });
+  h+='<div class="toolbar"><div><h2>Cuentas con los socios</h2><div class="hint" style="margin-top:3px">Gastos pagados con dinero personal. No descuentan de la caja hasta que D&amp;L los reembolse.</div></div></div><div class="cols" style="margin-bottom:22px">'+socios.map(x=>'<section class="panel"><div class="panel-h"><h3>'+(x.k==='laura'?'Laura':'Diego')+'</h3><span class="pill '+(x.sd>0?'warn':'ok')+'">'+(x.sd>0?'D&amp;L le debe '+money(x.sd):'Al día')+'</span></div><div class="kv"><span>Pagado de su bolsillo</span><span class="num">'+money(x.g)+'</span></div><div class="kv" style="margin-top:6px"><span>Reembolsado desde caja</span><span class="num">'+money(x.r)+'</span></div><div style="margin-top:12px"><button class="btn sm" data-act="reembolso" data-k="'+x.k+'" type="button">Registrar reembolso a '+(x.k==='laura'?'Laura':'Diego')+'</button></div></section>').join('')+'</div>';
+
+  /* entra: por cobrar */
+  h+='<div class="toolbar"><div><h2>Entra: por cobrar</h2><div class="hint" style="margin-top:3px">Cobros a clientes hasta fin de '+esc(monthLabel(m).split(' ')[0].toLowerCase())+'.</div></div></div><section class="panel" style="margin-bottom:22px"><div class="list">';
+  if(!cobrar.length) h+='<div class="empty">No hay cobros pendientes en este período.</div>';
+  cobrar.slice(0,8).forEach(p=>{ const c=clientById(p.clientId);
+    h+='<div class="row click" data-act="open-client" data-id="'+esc(c.id)+'" data-tab="pay" tabindex="0">'+logoHTML(c,'sm')+'<div class="r-main"><div class="r-title">'+esc(c.name)+' · '+esc(p.label)+'</div><div class="r-sub">Facturar '+fmtD(p.billDate)+(p.dueDate?' · pago esperado '+fmtD(p.dueDate):'')+'</div></div><div class="r-end"><div class="num" style="font-weight:700">'+money(p.amount)+'</div>'+payPill(p,c)+'</div></div>'; });
+  if(cobrar.length>8) h+='<div class="hint" style="padding-top:8px">y '+(cobrar.length-8)+' más. Revíselos dentro de cada cliente.</div>';
+  h+='</div></section>';
+
+  const mCost=mOutAll.filter(x=>x.kind!=='reembolso'); const ids=new Set(); mIn.concat(mCost).forEach(x=>ids.add(x.clientId||'_'));
+  const rows=Array.from(ids).map(id=>{ const c=id==='_'?null:clientById(id); const ins=mIn.filter(x=>(x.clientId||'_')===id), outs=mCost.filter(x=>(x.clientId||'_')===id);
+    const i=sum(ins,x=>x.amount), l=sum(outs.filter(x=>x.kind==='laura'),x=>x.amount), d=sum(outs.filter(x=>x.kind==='diego'),x=>x.amount), o=sum(outs.filter(x=>x.kind!=='laura'&&x.kind!=='diego'),x=>x.amount);
+    return {c,i,l,d,o,mg:i-l-d-o}; }).sort((a,b)=>b.i-a.i);
+  h+='<div class="toolbar"><h2>Resultado por cliente</h2></div>';
+  if(!rows.length) h+='<div class="empty">Sin entradas ni salidas registradas en este mes.</div>';
+  else { h+='<div class="tbl-wrap" style="margin-bottom:24px"><table><thead><tr><th>Cliente</th><th>Entró</th><th>Pago a Laura</th><th>Pago a Diego</th><th>Otras salidas</th><th>Margen</th></tr></thead><tbody>';
+    rows.forEach(r=>{ h+='<tr><td style="min-width:180px"><div style="display:flex;gap:10px;align-items:center">'+(r.c?logoHTML(r.c,'sm'):'')+'<b>'+esc(r.c?r.c.name:'Generales (sin cliente)')+'</b></div></td><td class="num">'+money(r.i)+'</td><td class="num">'+money(r.l)+'</td><td class="num">'+money(r.d)+'</td><td class="num">'+money(r.o)+'</td><td class="num" style="font-weight:700;color:'+(r.mg<0?'var(--bad)':'var(--fg)')+'">'+money(r.mg)+'</td></tr>'; });
+    h+='</tbody></table></div>'; }
+
+  const mv=L.filter(x=>ymOf(x.date)===m).slice().reverse();
+  h+='<div class="toolbar"><h2>Movimientos de caja</h2><span class="hint">'+mv.length+' '+plural(mv.length,'registro','registros')+'</span></div>';
+  if(!mv.length) h+='<div class="empty">Aún no hay entradas ni salidas en este mes. Las entradas se registran al marcar un cobro como recibido; las salidas, al pagar lo proyectado o registrar un gasto.</div>';
+  else { h+='<div class="tbl-wrap"><table><thead><tr><th>Fecha</th><th>Concepto</th><th>Tipo</th><th>Cliente</th><th>Entrada</th><th>Salida</th><th>Caja</th><th></th></tr></thead><tbody>';
+    mv.forEach(x=>{ const c=x.clientId?clientById(x.clientId):null;
+      h+='<tr><td class="num">'+fmtD(x.date)+'</td><td style="min-width:200px;font-weight:600">'+esc(x.concept)+(x.ref==='e'&&x.dir==='out'&&x.kind!=='reembolso'?'<div style="margin-top:4px">'+srcPill(x.src,!!x.src)+'</div>':'')+'</td><td><span class="pill '+(x.dir==='in'?'ok':(x.kind==='laura'?'laura':(x.kind==='diego'?'diego':'')))+'">'+esc(x.type)+'</span></td><td>'+esc(c?c.name:'General')+'</td><td class="num" style="color:var(--accent-ink);font-weight:700">'+(x.dir==='in'?money(x.amount):'')+'</td><td class="num" style="font-weight:700">'+(x.dir==='out'?money(x.amount):'')+'</td><td class="num">'+(x.personal?'<span class="hint">No afecta caja</span>':(x.bal!=null?money(x.bal):'—'))+'</td><td style="text-align:right;white-space:nowrap">'+(x.ref==='e'?'<button class="link" data-act="edit-exp" data-id="'+esc(x.id)+'" type="button">Editar</button>':'<button class="link" data-act="open-client" data-id="'+esc(x.clientId)+'" data-tab="pay" type="button">Ver cobro</button>')+'</td></tr>'; });
+    h+='</tbody></table></div>'; }
+  return h;
+}
+function srcOpts(v){ return Object.keys(SRC_LABEL).map(k=>'<option value="'+k+'"'+((v||'caja')===k?' selected':'')+'>'+SRC_LABEL[k]+'</option>').join(''); }
+function expenseForm(e,defStatus,defDate,preset){
+  const o=e||Object.assign({date:defDate||todayS(),kind:'otro',cat:defStatus?EXP_CATS[0]:'',amount:0,concept:'',payee:'',clientId:'',status:defStatus||'pagado',source:'caja'},preset||{});
+  const copt=['<option value="">General (sin cliente)</option>'].concat(S.clients.slice().sort((a,b)=>(a.name||'').localeCompare(b.name||'','es')).map(c=>'<option value="'+esc(c.id)+'"'+(o.clientId===c.id?' selected':'')+'>'+esc(c.name)+'</option>')).join('');
+  const stv=o.status==='pendiente'?'pendiente':'pagado';
+  openModal({title:e?'Editar movimiento':(defStatus==='pendiente'?'Agregar a la proyección de pagos':(preset&&preset.kind==='reembolso'?'Registrar reembolso a un socio':(defDate&&defDate.slice(0,7)<todayS().slice(0,7)?'Registrar pago realizado':'Registrar entrada o salida'))),
+    body:'<div class="f2"><div class="fld"><label for="ex-kind">Tipo</label><select class="inp" id="ex-kind">'+Object.keys(EXP_KIND).map(k=>'<option value="'+k+'"'+(o.kind===k?' selected':'')+'>'+EXP_KIND[k]+'</option>').join('')+'</select></div><div class="fld"><label for="ex-client">Cliente asociado</label><select class="inp" id="ex-client">'+copt+'</select></div></div>'
+     +'<div class="f2"><div class="fld"><label for="ex-concept">Concepto</label><input class="inp" id="ex-concept" placeholder="Ej. Pauta de octubre" value="'+esc(o.concept||'')+'"></div><div class="fld"><label for="ex-payee">Proveedor o plataforma</label><input class="inp" id="ex-payee" placeholder="Ej. Meta Ads, Google Ads" value="'+esc(o.payee||'')+'"></div></div>'
+     +'<div class="f3"><div class="fld"><label for="ex-amt">Valor (COP)</label><input class="inp num" id="ex-amt" inputmode="numeric" value="'+grp(o.amount)+'"></div><div class="fld"><label for="ex-status">Estado</label><select class="inp" id="ex-status"><option value="pagado"'+(stv==='pagado'?' selected':'')+'>Ya pagado</option><option value="pendiente"'+(stv==='pendiente'?' selected':'')+'>Por pagar</option></select></div><div class="fld"><label for="ex-date" id="ex-datelab">Fecha de pago</label><input class="inp" id="ex-date" type="date" value="'+esc(o.date||todayS())+'"></div></div>'
+     +'<div class="fld" id="ex-srcbox" style="max-width:420px"><label for="ex-src">Pagado desde</label><select class="inp" id="ex-src">'+srcOpts(o.source)+'</select><span class="hint">Si se pagó con dinero personal, no descuenta de la caja y queda como cuenta por reembolsar al socio.</span></div>'
+     +'<div class="fld" id="ex-socbox" style="max-width:320px"><label for="ex-socio">Socio que recibe el reembolso</label><select class="inp" id="ex-socio"><option value="laura"'+(o.socio!=='diego'?' selected':'')+'>Laura</option><option value="diego"'+(o.socio==='diego'?' selected':'')+'>Diego</option></select></div>'
+     +'<div class="fld" id="ex-catbox" style="max-width:360px"><label for="ex-cat">Categoría (otros gastos)</label><select class="inp" id="ex-cat">'+EXP_CATS.map(k=>'<option'+(o.cat===k?' selected':'')+'>'+k+'</option>').join('')+'</select></div>'
+     +'<label id="ex-recbox" style="display:flex;gap:8px;align-items:center;font-size:13px;font-weight:600"><input type="checkbox" id="ex-rec"'+(o.rec?' checked':'')+'> Se repite cada mes (se podrá traer a la proyección del mes siguiente)</label>'
+     +supportFields('ex',o,'Comprobante o cotización (imagen o PDF)'),
+    onMount:()=>{ $('#ex-amt').addEventListener('change',ev=>{ ev.target.value=grp(num(ev.target.value)); });
+      const sync=()=>{ const k=$('#ex-kind').value, fixed=(k==='ingreso'||k==='reembolso'); if(fixed) $('#ex-status').value='pagado'; $('#ex-status').disabled=fixed; const pend=$('#ex-status').value==='pendiente';
+        $('#ex-recbox').style.display=fixed?'none':'flex'; $('#ex-catbox').style.display=k==='otro'?'flex':'none'; $('#ex-socbox').style.display=k==='reembolso'?'flex':'none'; $('#ex-srcbox').style.display=(!fixed&&!pend)?'flex':'none';
+        $('#ex-datelab').textContent=k==='ingreso'?'Fecha en que entró':(pend?'Fecha límite de pago':'Fecha de pago'); };
+      $('#ex-kind').addEventListener('change',sync); $('#ex-status').addEventListener('change',sync); sync(); },
+    actions:[...(e?[{label:'Eliminar',kind:'danger',fn:async()=>{ await delDoc('expenses',e.id); toast('Movimiento eliminado'); }}]:[]),{label:'Cancelar',fn:()=>true},{label:'Guardar',kind:'pri',fn:async()=>{
+      const amount=num($('#ex-amt').value); if(!amount){ toast('Indique el valor.'); return false; }
+      const kind=$('#ex-kind').value, up=await uploadFile($('#ex-file')&&$('#ex-file').files[0]), status=$('#ex-status').value, fixed=(kind==='ingreso'||kind==='reembolso');
+      const data={kind,amount,status,date:$('#ex-date').value||todayS(),clientId:$('#ex-client').value,concept:$('#ex-concept').value.trim(),payee:$('#ex-payee').value.trim(),cat:kind==='otro'?$('#ex-cat').value:'',rec:!fixed&&$('#ex-rec').checked,link:$('#ex-link').value.trim(),
+        source:(fixed||status==='pendiente')?'caja':$('#ex-src').value,socio:kind==='reembolso'?$('#ex-socio').value:''};
+      if(status==='pendiente'&&e&&e.source) data.source=e.source;
+      if(up) Object.assign(data,up);
+      if(e) await patchDoc('expenses',e.id,data); else await saveDoc('expenses',null,Object.assign({createdAt:new Date().toISOString()},data));
+      toast(status==='pendiente'?'Pago pendiente registrado':(data.source!=='caja'?'Guardado: pagado de bolsillo, no descuenta de la caja':'Movimiento guardado')); }}]});
+}
+function payExpForm(e){
+  openModal({title:'Registrar pago realizado',
+    body:'<p style="margin:0;font-weight:600">'+esc(e.payee||e.concept||'Pago')+' · '+money(e.amount)+'</p><div class="f2"><div class="fld"><label for="pe-date">Fecha en que se pagó</label><input class="inp" id="pe-date" type="date" value="'+todayS()+'"></div><div class="fld"><label for="pe-src">Pagado desde</label><select class="inp" id="pe-src">'+srcOpts(e.source)+'</select></div></div><p class="hint" style="margin:0">Si lo pagó Laura o Diego con dinero personal, elija su bolsillo: no descuenta de la caja y queda por reembolsar.</p>'+supportFields('pe',e,'Comprobante de pago (imagen o PDF)'),
+    actions:[{label:'Cancelar',fn:()=>true},{label:'Marcar como pagado',kind:'pri',fn:async()=>{
+      const up=await uploadFile($('#pe-file')&&$('#pe-file').files[0]);
+      const data={status:'pagado',date:$('#pe-date').value||todayS(),source:$('#pe-src').value,link:$('#pe-link').value.trim()}; if(up) Object.assign(data,up);
+      await patchDoc('expenses',e.id,data); toast(data.source!=='caja'?'Pago registrado de bolsillo: no descuenta de la caja':'Pago registrado y descontado de la caja'); }}]});
+}
+
+function stat(k,v,s,cls){ return '<div class="stat '+(cls||'')+'"><div class="k">'+esc(k)+'</div><div class="v num">'+esc(v)+'</div><div class="s">'+esc(s)+'</div></div>'; }
+
+/* ───────── ficha de cliente ───────── */
+function drawClient(){
+  const c=clientById(S.cid), s=stats(c);
+  const terms = c.payMode==='mensual'
+    ? 'Pago mensual de '+money(c.monthly)+', se factura el día '+c.billDay+' de cada mes. Plazo de pago de '+(c.term!=null?c.term:0)+' días. Aviso '+(c.alertDays!=null?c.alertDays:3)+' días antes de facturar.'
+    : 'Pago por abonos: '+s.ps.length+' '+plural(s.ps.length,'pago','pagos')+' por un total de '+money(s.total)+'. Aviso '+(c.alertDays!=null?c.alertDays:3)+' días antes de facturar.';
+  let h=head('<button class="btn pri" data-act="add-task" type="button">+ Nueva tarea</button>');
+  h+='<button class="link back" data-act="home" type="button">← Todos los clientes</button>';
+  h+='<div class="c-head"><div style="display:flex;gap:16px;align-items:flex-start;min-width:0">'+logoHTML(c,'lg')+'<div style="min-width:0"><h1>'+esc(c.name)+'</h1><div class="chips" style="margin-top:8px"><span class="pill '+(c.payMode==='mensual'?'info':'')+'">'+(c.payMode==='mensual'?'Pago mensual':'Pago por abonos')+'</span>'+(c.status==='cerrado'?'<span class="pill">Inactivo</span>':'')+(c.contact?'<span class="chip">'+esc(c.contact)+'</span>':'')+(c.startDate?'<span class="chip">Inicio '+fmtD(c.startDate)+'</span>':'')+(c.endDate?'<span class="chip">Entrega '+fmtD(c.endDate)+'</span>':'')+'</div>'
+   +(c.scope?'<div class="ctx">'+esc(c.scope)+'</div>':'')+'</div></div></div>';
+  h+='<section class="stats" aria-label="Resumen del cliente">'
+   +stat('Cuentas por cobrar',money(s.mes),s.mesN+' '+plural(s.mesN,'cobro acumulado','cobros acumulados')+(s.atras?' · incluye '+money(s.atras)+' vencido':''),s.atras?'warm':'')
+   +stat('Fecha próxima factura',s.nextBill?fmtD(s.nextBill.billDate):'—',s.nextBill?esc2(s.nextBill.label)+' · '+money(s.nextBill.amount):'Nada por facturar',s.nextBill&&payAlert(s.nextBill,c)?(payAlert(s.nextBill,c).lvl==='bad'?'hot':'warm'):'')
+   +stat('Total tareas pendientes',String(s.pending),s.late?s.late+' vencidas':'Sin vencidas',s.late?'hot':'')
+   +stat('% de avance',s.pct+'%',s.done+' de '+s.all+' tareas cumplidas','good')
+   +'</section>';
+  const tabs=[['seg','Seguimiento',s.pending],['pay','Pagos',s.ps.length],['done','Ejecutado',s.done],['info','Ficha','']];
+  h+='<div class="tabs" role="tablist">'+tabs.map(t=>'<button class="tab" role="tab" aria-selected="'+(S.tab===t[0])+'" data-act="tab" data-tab="'+t[0]+'" type="button">'+t[1]+(t[2]!==''?'<span class="n">'+t[2]+'</span>':'')+'</button>').join('')+'</div>';
+  h+= S.tab==='pay'?tabPay(c,s): S.tab==='done'?tabDone(c,s): S.tab==='info'?tabInfo(c,s,terms): tabSeg(c,s);
+  return h;
+}
+const esc2 = esc;
+function logoHTML(c,size){
+  const cls='logo '+(size||'');
+  if(c&&c.logoId) return '<img class="'+cls+'" src="/_blob/'+esc(c.logoId)+'" alt="Logo de '+esc(c.name)+'">';
