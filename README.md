@@ -7,8 +7,12 @@ Módulos: Panel general, Clientes, Flujo de caja, Prospección (correo masivo de
 ## Estructura
 
 - `src/partes/parte1.html` … `parte5.html`: código fuente dividido en 5 partes (se unen en orden).
-- `assets/`: imágenes que usa la página (`logo_h.png`, `logo_sym.png`, `dylia.jpg`).
+- `assets/`: imágenes que usa la página. Deben estar estos 3 archivos: `logo_h.png` (logo horizontal), `logo_sym.png` (símbolo) y `dylia.jpg` (imagen de DYLIA).
 - `build.py`: une las partes, incrusta las imágenes y genera `clientes-dl.html`.
+
+## Pendiente de subir
+
+Las 3 imágenes de `assets/` se suben aparte (desde GitHub: Add file → Upload files, dentro de la carpeta `assets`), porque la herramienta de carga solo admite texto.
 
 ## Cómo generar la página
 
