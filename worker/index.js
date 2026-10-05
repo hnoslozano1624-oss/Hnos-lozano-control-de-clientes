@@ -1,5 +1,5 @@
 // Worker de D&L Hnos. Lozano: API sobre D1 (documentos y archivos), correo con Resend
-// y verificación de Cloudflare Access. La página estática la sirve ASSETS.
+// y acceso con usuario y contraseña. La página estática la sirve ASSETS.
 
 const COLLS = new Set(['clients', 'tasks', 'payments', 'expenses', 'settings', 'quotes', 'products', 'contacts', 'campaigns']);
 const MAX_DOC = 1_900_000;   // D1 admite ~2 MB por fila
@@ -7,40 +7,58 @@ const MAX_FILE = 1_500_000;  // archivo binario antes de pasar a base64
 
 const J = (o, s = 200, h = {}) => new Response(JSON.stringify(o), { status: s, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', ...h } });
 
-/* ───── Cloudflare Access ───── */
-let KEYS = null, KEYS_AT = 0, KEYS_TEAM = '';
-const teamHost = t => { t = String(t || '').trim().replace(/^https?:\/\//, '').replace(/\/.*$/, ''); return t.includes('.') ? t : t + '.cloudflareaccess.com'; };
-async function getKeys(host) {
-  if (KEYS && KEYS_TEAM === host && Date.now() - KEYS_AT < 3600e3) return KEYS;
-  const r = await fetch('https://' + host + '/cdn-cgi/access/certs');
-  if (!r.ok) throw new Error('certs');
-  KEYS = (await r.json()).keys || []; KEYS_AT = Date.now(); KEYS_TEAM = host; return KEYS;
+/* ───── usuario y contraseña (sesión firmada en una cookie) ───── */
+const SESSION_DAYS = 14;
+const enc = new TextEncoder();
+const b64url = u8 => btoa(String.fromCharCode(...u8)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+const unb64url = s => { s = s.replace(/-/g, '+').replace(/_/g, '/'); s += '='.repeat((4 - s.length % 4) % 4); return Uint8Array.from(atob(s), c => c.charCodeAt(0)); };
+const parseUsers = env => {
+  const m = new Map();
+  String(env.USUARIOS || '').split(/[;\n]+/).forEach(l => { const i = l.indexOf(':'); if (i > 0) { const u = l.slice(0, i).trim().toLowerCase(), p = l.slice(i + 1).trim(); if (u && p) m.set(u, p); } });
+  return m;
+};
+const sha = async s => new Uint8Array(await crypto.subtle.digest('SHA-256', enc.encode(s)));
+const same = (a, b) => { let d = a.length ^ b.length; for (let i = 0; i < Math.max(a.length, b.length); i++) d |= (a[i] || 0) ^ (b[i] || 0); return d === 0; };
+async function hmacKey(env) { return crypto.subtle.importKey('raw', await sha('dl-sesion|' + env.USUARIOS), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign', 'verify']); }
+async function makeToken(env, user) {
+  const p = b64url(enc.encode(JSON.stringify({ u: user, exp: Date.now() + SESSION_DAYS * 864e5 })));
+  const s = new Uint8Array(await crypto.subtle.sign('HMAC', await hmacKey(env), enc.encode(p)));
+  return p + '.' + b64url(s);
 }
-const b64u = s => { s = s.replace(/-/g, '+').replace(/_/g, '/'); s += '='.repeat((4 - s.length % 4) % 4); return Uint8Array.from(atob(s), c => c.charCodeAt(0)); };
-const jsonPart = s => JSON.parse(new TextDecoder().decode(b64u(s)));
+const notConfigured = { status: 503, body: { code: 'auth_not_configured', message: 'Falta configurar los usuarios del tablero (variable USUARIOS en el Worker). Por seguridad, el tablero no entrega datos hasta completarlo.' } };
 async function authenticate(req, env) {
-  if (!env.ACCESS_TEAM || !env.ACCESS_AUD) {
-    return { status: 503, body: { code: 'access_not_configured', message: 'Falta configurar Cloudflare Access (variables ACCESS_TEAM y ACCESS_AUD en el Worker). Por seguridad, el tablero no entrega datos hasta completarlo.' } };
-  }
-  const cookie = (req.headers.get('cookie') || '').match(/(?:^|;\s*)CF_Authorization=([^;]+)/);
-  const tok = req.headers.get('cf-access-jwt-assertion') || (cookie && cookie[1]);
-  if (!tok) return { status: 401, body: { code: 'unauthorized', message: 'Sin sesión de acceso.' } };
+  if (!parseUsers(env).size) return notConfigured;
+  const c = (req.headers.get('cookie') || '').match(/(?:^|;\s*)dl_session=([^;]+)/);
+  if (!c) return { status: 401, body: { code: 'unauthorized', message: 'Inicie sesión.' } };
   try {
-    const [h, p, s] = tok.split('.'); const host = teamHost(env.ACCESS_TEAM);
-    const head = jsonPart(h), payload = jsonPart(p);
-    const key = (await getKeys(host)).find(k => k.kid === head.kid);
-    if (!key) throw new Error('kid');
-    const ck = await crypto.subtle.importKey('jwk', key, { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' }, false, ['verify']);
-    const ok = await crypto.subtle.verify('RSASSA-PKCS1-v1_5', ck, b64u(s), new TextEncoder().encode(h + '.' + p));
-    const aud = [].concat(payload.aud || []);
-    if (!ok || !aud.includes(env.ACCESS_AUD) || payload.iss !== 'https://' + host || (payload.exp || 0) * 1000 < Date.now()) throw new Error('jwt');
-    const email = String(payload.email || '').toLowerCase();
-    const allow = String(env.ALLOWED_EMAILS || '').toLowerCase().split(/[\s,;]+/).filter(Boolean);
-    if (allow.length && !allow.includes(email)) return { status: 403, body: { code: 'forbidden', message: 'Este correo no tiene permiso para usar el tablero.' } };
-    return { email };
+    const [p, s] = c[1].split('.');
+    if (!(await crypto.subtle.verify('HMAC', await hmacKey(env), unb64url(s), enc.encode(p)))) throw new Error('firma');
+    const d = JSON.parse(new TextDecoder().decode(unb64url(p)));
+    if (!d.exp || d.exp < Date.now() || !parseUsers(env).has(d.u)) throw new Error('vencida');
+    return { email: d.u };
   } catch (e) {
-    return { status: 401, body: { code: 'unauthorized', message: 'Sesión de acceso no válida.' } };
+    return { status: 401, body: { code: 'unauthorized', message: 'Sesión no válida. Inicie sesión de nuevo.' } };
   }
+}
+const cookie = (v, age) => 'dl_session=' + v + '; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=' + age;
+async function login(req, env) {
+  const users = parseUsers(env); if (!users.size) return J(notConfigured.body, 503);
+  const ip = req.headers.get('cf-connecting-ip') || 'x', now = Date.now(), WIN = 15 * 60e3, MAXF = 8;
+  const row = await env.DB.prepare("SELECT data FROM docs WHERE coll='_login' AND id=?").bind(ip).first();
+  let st = row ? JSON.parse(row.data) : { n: 0, t: 0 }; if (now - st.t > WIN) st = { n: 0, t: now };
+  if (st.n >= MAXF) return J({ code: 'locked', message: 'Demasiados intentos fallidos. Espere 15 minutos e intente de nuevo.' }, 429);
+  let b = {}; try { b = JSON.parse(await req.text()); } catch (e) {}
+  const u = String(b.user || '').trim().toLowerCase(), p = String(b.pass || '');
+  const expected = users.get(u);
+  const ok = !!expected && same(await sha(p), await sha(expected));
+  if (!ok) {
+    st.n++; st.t = now;
+    await env.DB.prepare("INSERT INTO docs(coll,id,data,updated) VALUES('_login',?,?,?) ON CONFLICT(coll,id) DO UPDATE SET data=excluded.data,updated=excluded.updated").bind(ip, JSON.stringify(st), now).run();
+    await new Promise(r => setTimeout(r, 700));
+    return J({ code: 'bad_login', message: 'Usuario o contraseña incorrectos.' }, 401);
+  }
+  if (row) await env.DB.prepare("DELETE FROM docs WHERE coll='_login' AND id=?").bind(ip).run();
+  return J({ ok: true, user: u }, 200, { 'set-cookie': cookie(await makeToken(env, u), SESSION_DAYS * 86400) });
 }
 
 /* ───── utilidades ───── */
@@ -81,6 +99,8 @@ async function sendMail(req, env) {
 /* ───── enrutador ───── */
 async function handle(req, env, url) {
   const p = url.pathname, m = req.method;
+  if (p === '/api/login' && m === 'POST') return login(req, env);
+  if (p === '/api/logout') return J({ ok: true }, 200, { 'set-cookie': cookie('', 0) });
   const au = await authenticate(req, env); if (au.status) return J(au.body, au.status);
 
   if (p === '/api/me') return J({ email: au.email });
