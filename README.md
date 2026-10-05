@@ -48,3 +48,5 @@ node build.mjs artifact   # versión para claude.ai -> dist/artifact.html
 - Archivos de soporte: hasta 1,4 MB cada uno (se guardan dentro de D1; las imágenes se reducen solas).
 - Resend (plan gratuito): unos 100 correos por día.
 - El repositorio es público: no guarde claves ni datos de clientes en él.
+
+  
