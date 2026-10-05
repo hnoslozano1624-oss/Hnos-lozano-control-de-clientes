@@ -1,28 +1,44 @@
-# Control de clientes — D&L Hnos. Lozano
+# Control de clientes · D&L Hnos. Lozano
 
-Tablero de gestión de D&L Hnos. Lozano (una sola página HTML con JavaScript, publicada como Artifact de Claude).
-
-Módulos: Panel general, Clientes, Flujo de caja, Prospección (correo masivo desde Gmail), Cotizaciones (con PDF) y Productos.
+Tablero interno (clientes, tareas, cobros, flujo de caja, cotizaciones, productos y prospección por correo) que se publica en Cloudflare con datos en D1.
 
 ## Estructura
 
-- `src/partes/parte1.html` … `parte5.html`: código fuente dividido en 5 partes (se unen en orden).
-- `assets/`: imágenes que usa la página. Deben estar estos 3 archivos: `logo_h.png` (logo horizontal), `logo_sym.png` (símbolo) y `dylia.jpg` (imagen de DYLIA).
-- `build.py`: une las partes, incrusta las imágenes y genera `clientes-dl.html`.
+| Ruta | Contenido |
+| --- | --- |
+| `src/partes/parte1..5.html` | Código fuente del tablero (una sola página, dividida en 5 partes) |
+| `src/shim.js` | Conecta el tablero con la API del Worker cuando corre en Cloudflare |
+| `worker/index.js` | API del Worker: D1, archivos, verificación de Cloudflare Access y envío con Resend |
+| `build.mjs` | Une las partes, incrusta las imágenes y genera `dist/index.html` |
+| `wrangler.jsonc` | Configuración del Worker `hnos-lozano-control-de-clientes` y de la base D1 |
+| `assets/` | `logo_h.png`, `logo_sym.png`, `dylia.jpg` (subir manualmente; sin ellas el tablero compila, pero sin logos) |
 
-## Pendiente de subir
+## Despliegue
 
-Las 3 imágenes de `assets/` se suben aparte (desde GitHub: Add file → Upload files, dentro de la carpeta `assets`), porque la herramienta de carga solo admite texto.
+Cloudflare compila solo con cada cambio en `main` (Workers Builds). El comando de compilación es `node build.mjs` y el de despliegue `npx wrangler deploy`.
 
-## Cómo generar la página
+## Variables del Worker (Settings → Variables and Secrets)
+
+| Nombre | Tipo | Uso |
+| --- | --- | --- |
+| `ACCESS_TEAM` | Texto | Dominio del equipo de Zero Trust (p. ej. `miempresa.cloudflareaccess.com`) |
+| `ACCESS_AUD` | Texto | «Application Audience (AUD) Tag» de la aplicación de Access |
+| `ALLOWED_EMAILS` | Texto | Correos autorizados, separados por coma |
+| `RESEND_API_KEY` | Secreto | Clave de Resend |
+| `RESEND_FROM` | Texto | Remitente verificado, p. ej. `D&L <hola@midominio.com>` |
+| `REPLY_TO` | Texto (opcional) | Correo al que llegan respuestas y bajas |
+
+Sin `ACCESS_TEAM` y `ACCESS_AUD` el Worker no entrega ningún dato (por seguridad).
+
+## Compilar localmente
 
 ```
-python3 build.py
+node build.mjs            # versión Cloudflare -> dist/index.html
+node build.mjs artifact   # versión para claude.ai -> dist/artifact.html
 ```
 
-Resultado: `clientes-dl.html`, listo para publicar como Artifact.
+## Límites conocidos
 
-## Notas
-
-- Los datos (clientes, pagos, cotizaciones, contactos) viven en la base de datos del Artifact, no en este repositorio.
-- El envío de correos requiere el conector de Gmail activo en la cuenta de Claude de quien envía.
+- Archivos de soporte: hasta 1,4 MB cada uno (se guardan dentro de D1; las imágenes se reducen solas).
+- Resend (plan gratuito): unos 100 correos por día.
+- El repositorio es público: no guarde claves ni datos de clientes en él.
