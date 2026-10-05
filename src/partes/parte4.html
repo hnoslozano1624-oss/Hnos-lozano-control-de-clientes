@@ -1,0 +1,341 @@
+  el.innerHTML='<div class="hint" style="margin-bottom:8px">Se programarán <b>'+g.length+'</b> '+plural(g.length,'factura','facturas')+' de '+money(num(D.monthly))+' (total '+money(sum(g,x=>x.amount))+'). Si el cliente ya viene trabajando, marque lo que ya se facturó o se cobró.</div>'
+   +'<div class="tbl-wrap"><table style="min-width:520px"><thead><tr><th>Mes</th><th>Facturar</th><th>Valor</th><th>Estado</th></tr></thead><tbody>'+g.map(x=>'<tr><td style="font-weight:600">'+esc(x.label.replace('Mensualidad ',''))+'</td><td class="num">'+fmtD(x.billDate)+'</td><td class="num">'+money(x.amount)+'</td><td><select class="inp" id="ms-'+x.billDate+'" data-g="mst" data-b="'+x.billDate+'" aria-label="Estado de '+esc(x.label)+'">'+stOpts(D.mst[x.billDate]||'porfacturar')+'</select></td></tr>').join('')+'</tbody></table></div>'
+   +'<div style="margin-top:8px"><button class="btn sm" type="button" data-m="mst-past">Marcar como pagados los meses anteriores a hoy</button></div>';
+}
+function updateSum(){
+  const el=$('#pf-sum'); if(!el) return; const s=sum(D.rows,r=>num(r.amount));
+  el.className='hint '+(D.total&&s!==num(D.total)?'sum-bad':'sum-ok');
+  el.textContent='Suma de abonos '+money(s)+(D.total?(s===num(D.total)?' · coincide con el total':' · difiere del total en '+money(Math.abs(num(D.total)-s))):'');
+}
+function autoSplit(){ D.rows.forEach(r=>{ if(r.auto) r.amount=Math.round(num(D.total)*(r.pct/100)); }); }
+function syncAmounts(){ D.rows.forEach((r,i)=>{ const el=$('#pr-amt-'+i); if(el) el.value=grp(num(r.amount)); }); }
+function addTemplateTasks(k){
+  const start=D.startDate||todayS(), end=D.endDate&&dayDiff(D.endDate,start)>0?D.endDate:'';
+  SERVICES[k].tasks.forEach(tp=>{ let due=addDays(start,tp[1]); if(end&&dayDiff(due,end)>0) due=end; D.tasks.push({id:'n'+(++uid),title:tp[0],due,owner:'Laura',svc:k,off:tp[1],done:false}); });
+}
+function onStartChange(){
+  const st=D.startDate; if(!st) return;
+  const end=D.endDate&&dayDiff(D.endDate,st)>0?D.endDate:'';
+  if(!D._fm) D.firstMonth=st.slice(0,7);
+  if(!D._bd) D.billDay=Number(st.slice(8,10));
+  const r0=D.rows[0]; if(r0&&!r0.dt){ r0.bill=st; r0.due=st; }
+  D.tasks.forEach(t=>{ if(t.svc&&!t.dt&&t.off!=null){ let due=addDays(st,t.off); if(end&&dayDiff(due,end)>0) due=end; t.due=due; } });
+  paintTasks(); paintPay();
+}
+function bindForm(root,editing){
+  root.addEventListener('input',e=>{
+    const t=e.target, k=t.dataset.k, g=t.dataset.g; if(!k&&!g) return;
+    if(k){ D[k]=t.type==='number'?(t.value===''?'':Number(t.value)):t.value; return; }
+    const f=t.dataset.f, i=Number(t.dataset.i);
+    if(g==='task'){ D.tasks[i][f]=t.type==='checkbox'?t.checked:t.value; if(f==='due') D.tasks[i].dt=true; }
+    else if(g==='row'){ if(f==='amount'){ D.rows[i].amount=num(t.value); D.rows[i].auto=false; updateSum(); } else { D.rows[i][f]=t.value; if(f==='bill'||f==='due') D.rows[i].dt=true; } }
+    else if(g==='xr'){ D.extra[i][f]=f==='amount'?num(t.value):t.value; }
+    else if(g==='mst'){ D.mst[t.dataset.b]=t.value; }
+    else if(g==='pay'){ if(f==='total'||f==='monthly'){ D[f]=num(t.value); if(f==='total'){ autoSplit(); syncAmounts(); updateSum(); } else updatePrev(); } else { D[f]=t.type==='number'?Number(t.value):t.value; if(f==='firstMonth') D._fm=true; if(f==='billDay') D._bd=true; updatePrev(); } }
+  });
+  root.addEventListener('change',e=>{
+    const t=e.target; if(t.dataset.f==='amount'||t.dataset.f==='total'||t.dataset.f==='monthly'){ t.value=grp(num(t.value)); }
+    if(t.dataset.k==='startDate'&&!editing) onStartChange();
+    if(t.dataset.k==='endDate'&&!editing){ const last=D.rows[D.rows.length-1]; if(last&&!last.bill){ last.bill=D.endDate; last.due=D.endDate; } onStartChange(); }
+  });
+  root.addEventListener('click',e=>{
+    const b=e.target.closest('[data-m]'); if(!b||b.closest('#m-foot')) return;
+    const m=b.dataset.m, i=Number(b.dataset.i);
+    if(m==='svc'){ const k=b.dataset.k; if(D.services.includes(k)){ D.services=D.services.filter(x=>x!==k); if(!editing) D.tasks=D.tasks.filter(t=>t.svc!==k); } else { D.services.push(k); if(!editing) addTemplateTasks(k); } paintSvc(); if(!editing) paintTasks(); }
+    else if(m==='add-task-row'){ D.tasks.push({id:'n'+(++uid),title:'',due:'',owner:'Laura',svc:'',done:false,dt:true}); paintTasks(); const el=$('#tr-title-n'+uid); el&&el.focus(); }
+    else if(m==='del-task-row'){ D.tasks.splice(i,1); paintTasks(); }
+    else if(m==='tasks-past'){ const t0=todayS(); D.tasks.forEach(t=>{ if(t.due&&t.due<t0) t.done=true; }); paintTasks(); }
+    else if(m==='mode'){ D.payMode=b.dataset.k; paintMode(); paintPay(); }
+    else if(m==='add-pay-row'){ D.rows.push({label:'Abono adicional',pct:0,auto:false,amount:0,bill:'',due:'',st:'porfacturar'}); paintPay(); }
+    else if(m==='del-xr'){ D.extra.splice(i,1); paintPay(); }
+    else if(m==='del-pay-row'){ D.rows.splice(i,1); paintPay(); }
+    else if(m==='mst-past'){ const t0=todayS(); genMonths().forEach(x=>{ if(x.billDate<t0) D.mst[x.billDate]='pagado'; }); updatePrev(); }
+  });
+}
+async function pickLogo(){
+  const f=$('#cf-logo')&&$('#cf-logo').files[0]; if(!f) return null;
+  if(!/^image\//.test(f.type)){ toast('El logo debe ser una imagen (PNG, JPG o SVG).'); return false; }
+  return await uploadFile(f);
+}
+async function saveEdit(c){
+  if(!D.name.trim()){ toast('Escriba el nombre del cliente.'); return false; }
+  const lg=await pickLogo(); if(lg===false) return false;
+  const data={docType:D.docType||'factura',name:D.name.trim(),contact:D.contact.trim(),scope:D.scope.trim(),services:D.services,startDate:D.startDate||'',endDate:D.endDate||'',alertDays:Number(D.alertDays)||0};
+  if(lg) data.logoId=lg.fileId; else if($('#cf-rmlogo')&&$('#cf-rmlogo').checked) data.logoId=null;
+  await patchDoc('clients',c.id,data);
+  toast('Datos actualizados');
+}
+function statusData(st,p,now){
+  const o={invoiced:false,received:false,log:[{at:now,text:'Pago programado'}]}, t0=todayS();
+  if(st==='facturado'||st==='pagado'){ o.invoiced=true; o.invoiceNo=p.inv||''; o.docType=p.doc||'factura'; o.invoiceDate=p.billDate<=t0?p.billDate:t0; o.log.push({at:now,text:docLabel(o.docType)+' registrada (historial previo)'}); }
+  if(st==='pagado'){ const rd=p.dueDate||p.billDate; o.received=true; o.receivedDate=rd<=t0?rd:t0; o.receivedAmount=p.amount; o.log.push({at:now,text:'Registrado como pagado (historial previo)'}); }
+  return o;
+}
+async function createClient(){
+  if(!D.name.trim()){ toast('Escriba el nombre del cliente.'); return false; }
+  let pays=[];
+  if(D.payMode==='abonos'){
+    pays=D.rows.filter(r=>num(r.amount)>0||r.label.trim()).map(r=>({label:r.label.trim()||'Abono',amount:num(r.amount),billDate:r.bill,dueDate:r.due||r.bill,kind:'abono',st:r.st||'porfacturar'}));
+    if(!pays.length||pays.some(p=>!p.amount||!p.billDate)){ toast('Cada abono necesita valor y fecha de facturación.'); return false; }
+  } else {
+    if(!num(D.monthly)){ toast('Indique el valor mensual.'); return false; }
+    pays=genMonths().map(x=>Object.assign(x,{st:(D.mst||{})[x.billDate]||'porfacturar'})); if(!pays.length){ toast('Indique el primer mes a facturar.'); return false; }
+    const ex=(D.extra||[]).filter(r=>num(r.amount)>0||(r.label||'').trim());
+    if(ex.some(r=>!num(r.amount)||!r.bill)){ toast('Cada pago único necesita valor y fecha de facturación.'); return false; }
+    ex.forEach(r=>pays.push({label:(r.label||'').trim()||'Pago único',amount:num(r.amount),billDate:r.bill,dueDate:r.bill,kind:'abono',st:r.st||'porfacturar'}));
+  }
+  const lg=await pickLogo(); if(lg===false) return false;
+  const now=new Date().toISOString();
+  const cid=await saveDoc('clients',null,{logoId:lg?lg.fileId:null,docType:D.docType||'factura',name:D.name.trim(),contact:D.contact.trim(),scope:D.scope.trim(),services:D.services,startDate:D.startDate||'',endDate:D.endDate||'',alertDays:Number(D.alertDays)||0,status:'activo',payMode:D.payMode,
+    total:D.payMode==='abonos'?sum(pays,p=>p.amount):null,monthly:D.payMode==='mensual'?num(D.monthly):null,billDay:D.payMode==='mensual'?(Number(D.billDay)||1):null,term:D.payMode==='mensual'?(Number(D.term)||0):null,createdAt:now});
+  const t0=todayS(); for(const t of D.tasks.filter(t=>t.title.trim())) await saveDoc('tasks',null,{clientId:cid,title:t.title.trim(),due:t.due||'',owner:t.owner,done:!!t.done,doneAt:t.done?((t.due&&t.due<=t0)?t.due:t0):null,createdAt:now});
+  let n=0; for(const p of pays){ n++; const st=p.st; delete p.st; await saveDoc('payments',null,Object.assign({clientId:cid,seq:n,createdAt:now},p,statusData(st,Object.assign({doc:D.docType},p),now))); }
+  if(D.quoteId){ try{ await patchDoc('quotes',D.quoteId,{clientId:cid,clientCreated:true}); }catch(e){} }
+  S.view='client'; S.cid=cid; S.tab='seg'; render(); window.scrollTo(0,0); toast('Cliente creado con su plan de trabajo y de pagos');
+}
+
+
+
+/* ───────── productos (catálogo sin valor fijo) ───────── */
+const SIZES=[['p1','Pequeña'],['p2','Mediana'],['p3','Grande']];
+const sizeKey={pequena:'p1',mediana:'p2',grande:'p3'};
+function drawProd(){
+  const ps=S.prods.slice().sort((a,b)=>(a.name||'').localeCompare(b.name||'','es'));
+  let h=head('<button class="btn pri" data-act="new-prod" type="button">+ Nuevo producto</button>');
+  h+='<div style="margin-bottom:6px"><h1>Productos</h1><div class="hint" style="margin-top:4px">Catálogo base de servicios: nombre, descripción y precio base según el tamaño de la empresa. Al cotizar se jalan de aquí y se pueden ajustar.</div></div>'+navTabs();
+  if(!ps.length){ return h+'<div class="welcome"><h3>Aún no hay productos</h3><p>Cree cada servicio una sola vez, con su descripción base y un precio de referencia para empresa pequeña, mediana o grande. Después lo agrega a cualquier cotización en un clic y ajusta lo que la negociación requiera.</p><button class="btn pri" data-act="new-prod" type="button">Crear primer producto</button></div>'; }
+  h+='<div class="prodgrid">'+ps.map(p=>'<div class="pcard"><div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start"><div class="pn">'+esc(p.name)+'</div><span class="pill '+(p.mode==='mensual'?'info':'ok')+'">'+(p.mode==='mensual'?'Mensual':'Pago único')+'</span></div>'
+    +'<div class="pd">'+esc(p.desc||'Sin descripción')+'</div>'
+    +'<div class="psz">'+SIZES.map(z=>'<div><span>'+z[1]+'</span><b>'+(p[z[0]]?esc(money(p[z[0]])):'—')+'</b></div>').join('')+'</div>'
+    +'<div><button class="btn sm" data-act="edit-prod" data-id="'+esc(p.id)+'" type="button">Editar</button></div></div>').join('')+'</div>';
+  return h;
+}
+function productForm(p){
+  const editing=!!p; const o=p||{name:'',desc:'',mode:'unico',p1:0,p2:0,p3:0};
+  const actions=[{label:'Cancelar',fn:()=>true}];
+  if(editing) actions.push({label:'Eliminar',kind:'danger',keep:true,fn:b=>{ if(!b.dataset.armed){ b.dataset.armed='1'; b.classList.add('armed'); b.textContent='¿Confirmar eliminación?'; return; } delDoc('products',p.id).then(()=>{ closeModal(); toast('Producto eliminado. Las cotizaciones ya hechas no cambian.'); }).catch(fail); }});
+  actions.push({label:editing?'Guardar cambios':'Crear producto',kind:'pri',fn:async()=>{
+    const name=($('#pr-name').value||'').trim(); if(!name){ toast('Indique el nombre del producto.'); return false; }
+    await saveDoc('products',p&&p.id,{name,desc:($('#pr-desc').value||'').trim(),mode:$('#pr-mode').value==='mensual'?'mensual':'unico',p1:num($('#pr-p1').value),p2:num($('#pr-p2').value),p3:num($('#pr-p3').value),createdAt:(p&&p.createdAt)||new Date().toISOString()});
+    toast(editing?'Producto actualizado':'Producto creado'); }});
+  openModal({title:editing?'Editar producto':'Nuevo producto',wide:true,
+    body:'<div class="f2"><div class="fld"><label for="pr-name">Nombre del producto o servicio</label><input class="inp" id="pr-name" value="'+esc(o.name)+'" placeholder="Ej. Gestión de redes sociales"></div>'
+     +'<div class="fld"><label for="pr-mode">Modalidad habitual de pago</label><select class="inp" id="pr-mode"><option value="unico"'+(o.mode!=='mensual'?' selected':'')+'>Pago único</option><option value="mensual"'+(o.mode==='mensual'?' selected':'')+'>Pago mensual</option></select></div></div>'
+     +'<div class="fld"><label for="pr-desc">Descripción base</label><textarea class="inp" id="pr-desc" rows="6" placeholder="Qué incluye, entregables, frecuencia, alcance…">'+esc(o.desc)+'</textarea><span class="hint">Es el texto que aparece en la cotización; allí se puede editar o ampliar para cada cliente.</span></div>'
+     +'<div class="fld"><span class="lab">Precio base según el tamaño de la empresa (opcional)</span><span class="hint">Es solo una referencia: en cada cotización se puede cambiar según la negociación.</span></div>'
+     +'<div class="f3">'+SIZES.map(z=>'<div class="fld"><label for="pr-'+z[0]+'">Empresa '+z[1].toLowerCase()+' (COP)</label><input class="inp num" id="pr-'+z[0]+'" inputmode="numeric" value="'+esc(grp(o[z[0]]))+'"></div>').join('')+'</div>',
+    onMount:()=>{ SIZES.forEach(z=>$('#pr-'+z[0]).addEventListener('change',e=>{ e.target.value=grp(num(e.target.value)); })); },
+    actions});
+}
+
+/* ───────── cotizaciones ───────── */
+const QSTATUS={espera:['En espera','warn'],aprobada:['Aprobada','ok'],rechazada:['Rechazada','bad']};
+const qItem=()=>({name:'',desc:'',mode:'unico',qty:1,price:0});
+const qBasePrice=(pr,size)=>Number(pr[sizeKey[size]||'p2'])||0;
+const qBlank=()=>({size:'mediana',clientId:'',cName:'',cNit:'',cContact:'',cEmail:'',cPhone:'',title:'',date:todayS(),valid:15,exec:'laura',status:'espera',notes:'',items:[qItem()]});
+const nextQNum=()=>Math.max(99,...S.quotes.map(q=>Number(q.num)||0))+1;
+const qTotals=q=>{ let u=0,m=0; (q.items||[]).forEach(i=>{ const v=(Number(i.price)||0)*(Number(i.qty)||1); if(i.mode==='mensual') m+=v; else u+=v; }); return {u,m}; };
+function empData(){
+  const e=S.empresa||{}; const ex=(k,n)=>Object.assign({name:n,cargo:'',phone:'',email:''},e[k]||{});
+  return {nombre:e.nombre||'D&L Hnos. Lozano',nit:e.nit||'',dir:e.dir||'',web:e.web||'',tel:e.tel||'',email:e.email||'',wa:e.wa||'',waText:e.waText!=null?e.waText:'Hola, vi su correo de D&L Hnos. Lozano y quiero más información.',laura:ex('laura','Laura Robayo'),diego:ex('diego','Diego Robayo')};
+}
+function drawCot(){
+  const qs=S.quotes.slice().sort((a,b)=>(b.num||0)-(a.num||0));
+  const esp=qs.filter(q=>!q.status||q.status==='espera'), apr=qs.filter(q=>q.status==='aprobada');
+  const tt=l=>l.reduce((a,q)=>{ const t=qTotals(q); return {u:a.u+t.u,m:a.m+t.m}; },{u:0,m:0});
+  const te=tt(esp), ta=tt(apr);
+  let h=head('<button class="btn pri" data-act="new-quote" type="button">+ Nueva cotización</button>');
+  h+='<div style="margin-bottom:6px"><h1>Cotizaciones</h1><div class="hint" style="margin-top:4px">Arme la propuesta de servicios de marketing y descárguela en PDF con el membrete de D&amp;L.</div></div>'+navTabs();
+  h+='<section class="stats" aria-label="Cotizaciones">'
+   +stat('Cotizaciones',String(qs.length),'Próximo consecutivo N.º '+nextQNum(),'')
+   +stat('En espera',String(esp.length),'Único '+money(te.u)+' · Mensual '+money(te.m),esp.length?'hot':'')
+   +stat('Aprobadas',String(apr.length),'Único '+money(ta.u)+' · Mensual '+money(ta.m),'good')
+   +'</section>';
+  h+='<div class="toolbar"><h2>Historial</h2><button class="btn sm" data-act="company" type="button">Datos de D&amp;L para el PDF</button></div>';
+  if(!qs.length){ h+='<div class="welcome"><h3>Aún no hay cotizaciones</h3><p>Cree la primera: elija el cliente, agregue uno o varios servicios (pago único o mensual, cada uno con su descripción) y descargue el PDF. El consecutivo empieza en 100.</p><button class="btn pri" data-act="new-quote" type="button">Crear cotización</button></div>'; return h; }
+  h+='<div class="tbl-wrap"><table><thead><tr><th>N.º</th><th>Fecha</th><th>Cliente</th><th>Servicios</th><th>Pago único</th><th>Mensual</th><th>Estado</th><th></th></tr></thead><tbody>';
+  qs.forEach(q=>{ const t=qTotals(q), st=QSTATUS[q.status||'espera']||QSTATUS.espera, names=(q.items||[]).map(i=>i.name).filter(Boolean);
+    h+='<tr><td class="num" style="font-weight:800">'+esc(q.num)+'</td><td>'+esc(fmtD(q.date))+'</td><td style="font-weight:600">'+esc(q.cName||'—')+'</td><td class="hint" style="max-width:260px">'+esc(names.join(' · ')||'—')+'</td><td class="num">'+(t.u?esc(money(t.u)):'—')+'</td><td class="num">'+(t.m?esc(money(t.m))+' /mes':'—')+'</td><td><span class="pill '+st[1]+'">'+st[0]+'</span></td>'
+     +'<td style="white-space:nowrap">'+((!q.status||q.status==='espera')?'<button class="btn sm pri" data-act="approve-quote" data-id="'+esc(q.id)+'" type="button">Aprobar</button> ':'')+(q.status==='aprobada'&&!q.clientCreated&&!(q.clientId&&clientById(q.clientId))?'<button class="btn sm pri" data-act="quote-client" data-id="'+esc(q.id)+'" type="button">Crear cliente</button> ':'')+'<button class="btn sm" data-act="pdf-quote" data-id="'+esc(q.id)+'" type="button">PDF</button> <button class="btn sm" data-act="edit-quote" data-id="'+esc(q.id)+'" type="button">Editar</button></td></tr>'; });
+  return h+'</tbody></table></div>';
+}
+
+let Q=null;
+function quoteForm(q,pre){
+  const editing=!!q;
+  Q=Object.assign(qBlank(),editing?JSON.parse(JSON.stringify(q)):(pre||{}));
+  if(!Q.items||!Q.items.length) Q.items=[qItem()];
+  Q.items.forEach(i=>{ i.pe=true; });
+  const E=empData();
+  const num_=editing?q.num:nextQNum();
+  const body=
+   '<div class="f3"><div class="fld"><label for="q-date">Fecha</label><input class="inp" id="q-date" type="date" data-q="date" value="'+esc(Q.date)+'"></div>'
+   +'<div class="fld"><label for="q-valid">Vigencia (días)</label><input class="inp num" id="q-valid" type="number" min="1" data-q="valid" value="'+esc(Q.valid)+'"></div>'
+   +'<div class="fld"><label for="q-exec">Ejecutivo que firma</label><select class="inp" id="q-exec" data-q="exec"><option value="laura"'+(Q.exec==='laura'?' selected':'')+'>'+esc(E.laura.name)+'</option><option value="diego"'+(Q.exec==='diego'?' selected':'')+'>'+esc(E.diego.name)+'</option></select></div></div>'
+   +'<hr class="hr"><div class="f2"><div class="fld"><label for="q-cli">Cliente</label><select class="inp" id="q-cli"><option value="">Prospecto o cliente nuevo (escribir datos)</option>'+S.clients.slice().sort((a,b)=>(a.name||'').localeCompare(b.name||'','es')).map(c=>'<option value="'+esc(c.id)+'"'+(Q.clientId===c.id?' selected':'')+'>'+esc(c.name)+'</option>').join('')+'</select></div>'
+   +'<div class="fld"><label for="q-size">Tamaño de la empresa</label><select class="inp" id="q-size" data-q="size"><option value="pequena"'+(Q.size==='pequena'?' selected':'')+'>Pequeña</option><option value="mediana"'+(Q.size==='mediana'?' selected':'')+'>Mediana</option><option value="grande"'+(Q.size==='grande'?' selected':'')+'>Grande</option></select><span class="hint">Define el precio base de los productos del catálogo.</span></div></div>'
+   +'<div class="f2"><div class="fld"><label for="q-name">Nombre o razón social</label><input class="inp" id="q-name" data-q="cName" value="'+esc(Q.cName)+'" placeholder="Nombre de la empresa o persona"></div><div class="fld"><label for="q-nit">NIT o cédula</label><input class="inp" id="q-nit" data-q="cNit" value="'+esc(Q.cNit)+'"></div></div>'
+   +'<div class="f3"><div class="fld"><label for="q-contact">Persona de contacto</label><input class="inp" id="q-contact" data-q="cContact" value="'+esc(Q.cContact)+'"></div><div class="fld"><label for="q-email">Correo</label><input class="inp" id="q-email" type="email" data-q="cEmail" value="'+esc(Q.cEmail)+'"></div><div class="fld"><label for="q-phone">Teléfono</label><input class="inp" id="q-phone" data-q="cPhone" value="'+esc(Q.cPhone)+'"></div></div>'
+   +'<div class="fld"><label for="q-title">Asunto de la propuesta (opcional)</label><input class="inp" id="q-title" data-q="title" value="'+esc(Q.title)+'" placeholder="Ej. Propuesta de servicios de marketing digital"></div>'
+   +'<hr class="hr"><div class="fld"><span class="lab">Servicios cotizados</span><span class="hint">Agregue un ítem por cada servicio. Cada uno lleva su descripción, valor y si es pago único o mensual.</span><div id="q-items" style="display:flex;flex-direction:column;gap:10px;margin-top:6px"></div><div class="qpick">'+(S.prods.length?'<select class="inp" id="q-prod" aria-label="Agregar desde productos"><option value="">+ Agregar desde Productos…</option>'+S.prods.slice().sort((a,b)=>(a.name||'').localeCompare(b.name||'','es')).map(x=>'<option value="'+esc(x.id)+'">'+esc(x.name)+'</option>').join('')+'</select>':'')+'<button class="btn sm" type="button" data-m="q-add">+ Servicio en blanco</button></div><div class="qtot" id="q-tot"></div></div>'
+   +'<div class="fld"><label for="q-notes">Condiciones y observaciones (opcional)</label><textarea class="inp" id="q-notes" data-q="notes" placeholder="Forma de pago, tiempos de entrega, qué incluye y qué no, etc.">'+esc(Q.notes)+'</textarea></div>'
+   +(editing?'<div class="fld" style="max-width:260px"><label for="q-status">Estado</label><select class="inp" id="q-status" data-q="status">'+Object.keys(QSTATUS).map(k=>'<option value="'+k+'"'+(Q.status===k?' selected':'')+'>'+QSTATUS[k][0]+'</option>').join('')+'</select></div>':'');
+  const actions=[{label:'Cancelar',fn:()=>true}];
+  if(editing) actions.push({label:'Eliminar',kind:'danger',keep:true,fn:b=>{ if(!b.dataset.armed){ b.dataset.armed='1'; b.classList.add('armed'); b.textContent='¿Confirmar eliminación?'; return; } delDoc('quotes',q.id).then(()=>{ closeModal(); toast('Cotización eliminada'); }).catch(fail); }});
+  actions.push({label:'Guardar',fn:()=>saveQuote(q,false)});
+  actions.push({label:'Guardar y descargar PDF',kind:'pri',fn:()=>saveQuote(q,true)});
+  openModal({title:(editing?'Cotización N.º ':'Nueva cotización N.º ')+num_,wide:true,body,actions,onMount:root=>{ paintQItems(); bindQuote(root); }});
+}
+function paintQItems(){
+  $('#q-items').innerHTML=Q.items.map((it,i)=>'<div class="qitem"><div class="qhead">'
+   +'<div class="fld q-n"><label for="qi-n'+i+'">Servicio '+(i+1)+'</label><input class="inp" id="qi-n'+i+'" data-qi="1" data-f="name" data-i="'+i+'" placeholder="Ej. Gestión de redes sociales" value="'+esc(it.name)+'"></div>'
+   +'<div class="fld"><label for="qi-m'+i+'">Modalidad de pago</label><select class="inp" id="qi-m'+i+'" data-qi="1" data-f="mode" data-i="'+i+'"><option value="unico"'+(it.mode!=='mensual'?' selected':'')+'>Pago único</option><option value="mensual"'+(it.mode==='mensual'?' selected':'')+'>Pago mensual</option></select></div>'
+   +'<div class="fld"><label for="qi-q'+i+'">Cant.</label><input class="inp num" id="qi-q'+i+'" inputmode="numeric" data-qi="1" data-f="qty" data-i="'+i+'" value="'+esc(it.qty)+'"></div>'
+   +'<div class="fld"><label for="qi-p'+i+'">Valor unitario (COP)</label><input class="inp num" id="qi-p'+i+'" inputmode="numeric" data-qi="1" data-f="price" data-i="'+i+'" value="'+esc(grp(it.price))+'"></div>'
+   +'<button class="x" type="button" data-m="q-del" data-i="'+i+'" aria-label="Quitar servicio '+(i+1)+'">×</button></div>'
+   +'<div class="fld"><label for="qi-d'+i+'">Descripción del servicio</label><textarea class="inp" id="qi-d'+i+'" rows="3" data-qi="1" data-f="desc" data-i="'+i+'" placeholder="Alcance, entregables, frecuencia, qué incluye…">'+esc(it.desc)+'</textarea></div></div>').join('');
+  updateQTot();
+}
+function updateQTot(){
+  const t=qTotals(Q), el=$('#q-tot'); if(!el) return;
+  el.innerHTML=(t.u?'<span>Total pago único <b>'+esc(money(t.u))+'</b></span>':'')+(t.m?'<span>Total mensual <b>'+esc(money(t.m))+'</b></span>':'')+(!t.u&&!t.m?'<span class="hint">Ingrese el valor de cada servicio.</span>':'');
+}
+function bindQuote(root){
+  root.addEventListener('input',e=>{
+    const t=e.target;
+    if(t.dataset.q){ const k=t.dataset.q; Q[k]=k==='valid'?(Number(t.value)||''):t.value; return; }
+    if(t.dataset.qi){ const it=Q.items[Number(t.dataset.i)], f=t.dataset.f; if(!it) return;
+      if(f==='price'){ it.price=num(t.value); it.pe=true; } else if(f==='qty') it.qty=num(t.value)||1; else it[f]=t.value; updateQTot(); }
+  });
+  root.addEventListener('change',e=>{
+    const t=e.target;
+    if(t.dataset.f==='price') t.value=grp(num(t.value));
+    if(t.id==='q-size'){ Q.size=t.value; let n=0; Q.items.forEach(it=>{ if(it.pid&&!it.pe){ const pr=S.prods.find(x=>x.id===it.pid); if(pr){ it.price=qBasePrice(pr,Q.size); n++; } } }); if(n){ paintQItems(); toast('Precios base actualizados al tamaño elegido'); } }
+    if(t.id==='q-prod'){ const pr=S.prods.find(x=>x.id===t.value); t.value=''; if(pr){ const it={name:pr.name,desc:pr.desc||'',mode:pr.mode==='mensual'?'mensual':'unico',qty:1,price:qBasePrice(pr,Q.size),pid:pr.id,pe:false};
+        const f0=Q.items.length===1&&!(Q.items[0].name||'').trim()&&!Q.items[0].price&&!(Q.items[0].desc||'').trim(); if(f0) Q.items[0]=it; else Q.items.push(it); paintQItems(); if(!it.price) toast('Este producto no tiene precio base para ese tamaño. Ingréselo en la cotización.'); } }
+    if(t.id==='q-cli'){ const c=clientById(t.value); Q.clientId=t.value; if(c){ Q.cName=c.name||''; Q.cContact=c.contact||Q.cContact; $('#q-name').value=Q.cName; $('#q-contact').value=Q.cContact; } }
+  });
+  root.addEventListener('click',e=>{
+    const b=e.target.closest('[data-m]'); if(!b||b.closest('#m-foot')) return;
+    const m=b.dataset.m, i=Number(b.dataset.i);
+    if(m==='q-add'){ Q.items.push(qItem()); paintQItems(); const el=$('#qi-n'+(Q.items.length-1)); el&&el.focus(); }
+    else if(m==='q-del'){ Q.items.splice(i,1); if(!Q.items.length) Q.items.push(qItem()); paintQItems(); }
+  });
+}
+async function saveQuote(q,andPdf){
+  const items=Q.items.filter(i=>(i.name||'').trim()||i.price).map(i=>({pid:i.pid||'',name:(i.name||'').trim(),desc:(i.desc||'').trim(),mode:i.mode==='mensual'?'mensual':'unico',qty:Number(i.qty)||1,price:Number(i.price)||0}));
+  if(!(Q.cName||'').trim()){ toast('Indique el nombre del cliente.'); return false; }
+  if(!items.length||items.some(i=>!i.name)){ toast('Cada servicio necesita un nombre.'); return false; }
+  const num_=q?q.num:nextQNum(), now=new Date().toISOString();
+  const data={size:Q.size||'mediana',num:num_,date:Q.date||todayS(),valid:Number(Q.valid)||15,clientId:Q.clientId||'',cName:Q.cName.trim(),cNit:(Q.cNit||'').trim(),cContact:(Q.cContact||'').trim(),cEmail:(Q.cEmail||'').trim(),cPhone:(Q.cPhone||'').trim(),title:(Q.title||'').trim(),exec:Q.exec==='diego'?'diego':'laura',status:Q.status||'espera',notes:(Q.notes||'').trim(),items,createdAt:q?(q.createdAt||now):now,updatedAt:now};
+  const id=await saveDoc('quotes',q&&q.id,data);
+  toast('Cotización N.º '+num_+' guardada');
+  if(andPdf) await pdfQuote(Object.assign({id},data));
+  if(data.status==='aprobada'&&(!q||q.status!=='aprobada')){ const full=Object.assign({id},data); setTimeout(()=>startFromQuote(full),80); }
+}
+function companyForm(){
+  const E=empData();
+  const fl=(id,l,v,ph,type)=>'<div class="fld"><label for="'+id+'">'+l+'</label><input class="inp" id="'+id+'" '+(type?'type="'+type+'" ':'')+'value="'+esc(v)+'" placeholder="'+esc(ph||'')+'"></div>';
+  const ex=(k,t)=>'<div class="fld"><span class="lab">'+t+'</span></div><div class="f2">'+fl('cp-'+k+'-name','Nombre',E[k].name)+fl('cp-'+k+'-cargo','Cargo',E[k].cargo,'Ej. Gerente de mercadeo')+'</div><div class="f2">'+fl('cp-'+k+'-phone','Teléfono / WhatsApp',E[k].phone)+fl('cp-'+k+'-email','Correo',E[k].email,'','email')+'</div>';
+  openModal({title:'Datos de D&L para las cotizaciones',wide:true,
+   body:'<p class="hint" style="margin:0">Se imprimen en el membrete y en la firma del PDF. Los campos vacíos no aparecen.</p>'
+    +'<div class="f2">'+fl('cp-nombre','Razón social o nombre comercial',E.nombre)+fl('cp-nit','NIT',E.nit)+'</div>'
+    +'<div class="f2">'+fl('cp-dir','Dirección y ciudad',E.dir)+fl('cp-web','Sitio web',E.web,'hermanoslozano.com')+'</div>'
+    +'<div class="f2">'+fl('cp-tel','Teléfono de la empresa',E.tel)+fl('cp-email','Correo de la empresa',E.email,'','email')+'</div>'
+    +'<div class="f2">'+fl('cp-wa','WhatsApp corporativo (botón de los correos)',E.wa,'Ej. 300 123 4567')+fl('cp-watext','Mensaje que llega al WhatsApp al dar clic',E.waText)+'</div>'
+    +'<hr class="hr">'+ex('laura','Ejecutiva: Laura')+'<hr class="hr">'+ex('diego','Ejecutivo: Diego'),
+   actions:[{label:'Cancelar',fn:()=>true},{label:'Guardar',kind:'pri',fn:async()=>{
+     const v=id=>($('#'+id).value||'').trim(), ex=k=>({name:v('cp-'+k+'-name'),cargo:v('cp-'+k+'-cargo'),phone:v('cp-'+k+'-phone'),email:v('cp-'+k+'-email')});
+     await S.db.collection('settings').doc('empresa').set({nombre:v('cp-nombre'),nit:v('cp-nit'),dir:v('cp-dir'),web:v('cp-web'),tel:v('cp-tel'),email:v('cp-email'),wa:v('cp-wa'),waText:v('cp-watext'),laura:ex('laura'),diego:ex('diego')});
+     toast('Datos guardados'); }}]});
+}
+
+/* ── PDF ── */
+function loadJsPdf(){
+  if(window.jspdf&&window.jspdf.jsPDF) return Promise.resolve(window.jspdf.jsPDF);
+  return new Promise((res,rej)=>{ const sc=document.createElement('script'); sc.src='https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
+    sc.onload=()=>(window.jspdf&&window.jspdf.jsPDF)?res(window.jspdf.jsPDF):rej(new Error('jspdf')); sc.onerror=()=>rej(new Error('jspdf')); document.head.appendChild(sc); });
+}
+const imgDims=src=>new Promise(res=>{ const i=new Image(); i.onload=()=>res({w:i.naturalWidth||820,h:i.naturalHeight||223}); i.onerror=()=>res({w:820,h:223}); i.src=src; });
+const pdfTxt=s=>String(s==null?'':s).replace(/ /g,' ').replace(/[‘’]/g,"'").replace(/[“”]/g,'"').replace(/[^\n\x20-\x7e\xa0-\xff–—•…€]/g,'');
+const pdfMoney=n=>'$ '+new Intl.NumberFormat('es-CO').format(Number(n)||0).replace(/ /g,' ');
+const longDate=s=>{ try{ return new Intl.DateTimeFormat('es-CO',{day:'numeric',month:'long',year:'numeric'}).format(parse(s)); }catch(e){ return s||''; } };
+async function pdfQuote(q){
+  if(!q) return;
+  let blob;
+  try{ blob=await buildPdf(q); }
+  catch(err){ console.error(err); toast('No se pudo generar el PDF. Revise su conexión e intente de nuevo.'); return; }
+  const E=empData(), ex=E[q.exec==='diego'?'diego':'laura'];
+  const fname='Cotizacion-'+q.num+'-'+(pdfTxt(q.cName).normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^A-Za-z0-9]+/g,'-').replace(/^-|-$/g,'')||'cliente')+'.pdf';
+  try{
+    if(S.dl){ await S.dl.save({filename:fname,data:blob}); }
+    else { const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=fname; document.body.appendChild(a); a.click(); setTimeout(()=>{ URL.revokeObjectURL(a.href); a.remove(); },4000); }
+    toast((!ex.phone&&!E.tel)||(!ex.email&&!E.email)?'PDF listo. Complete teléfono y correo en "Datos de D&L para el PDF" para que aparezcan en la firma.':'PDF de la cotización N.º '+q.num+' listo.');
+  }catch(err){ toast(err&&err.code==='declined'?'Descarga cancelada.':'No se pudo guardar el PDF.'); }
+}
+async function buildPdf(q){
+  const JsPDF=await loadJsPdf(), E=empData(), ex=E[q.exec==='diego'?'diego':'laura'], T=pdfTxt;
+  const doc=new JsPDF({unit:'mm',format:'a4'}), W=210, H=297, M=14, R=W-M, LIM=H-22;
+  const DARK=[26,20,18], GREEN=[126,211,33], GD=[62,142,15], GRAY=[100,100,96], INK=[30,26,24], LINE=[222,222,216];
+  const lg=await imgDims(LOGO_H);
+  const col=c=>doc.setTextColor(c[0],c[1],c[2]);
+  const font=(st,sz,c)=>{ doc.setFont('helvetica',st); doc.setFontSize(sz); col(c||INK); };
+  const lines=(t,w)=>doc.splitTextToSize(T(t),w);
+  function band(first){
+    const bh=first?40:20;
+    doc.setFillColor(...DARK); doc.rect(0,0,W,bh,'F');
+    [[155,230,53],[109,194,26],[62,142,15]].forEach((c,i)=>{ doc.setFillColor(c[0],c[1],c[2]); doc.rect(i*W/3,bh,W/3+0.3,1.4,'F'); });
+    const lh=first?24:11, lw=lh*lg.w/lg.h; doc.addImage(LOGO_H,'PNG',M,(bh-lh)/2,lw,lh);
+    if(first){ font('bolditalic',22,GREEN); doc.text('COTIZACIÓN',R,17,{align:'right'}); font('bold',12,[255,255,255]); doc.text('N.º '+q.num,R,25,{align:'right'}); font('normal',9,[190,190,184]); doc.text(T(longDate(q.date)),R,31,{align:'right'}); }
+    else { font('bolditalic',11,GREEN); doc.text('Cotización N.º '+q.num,R,12.5,{align:'right'}); }
+    return first?52:30;
+  }
+  function label(t,x,y){ font('bold',7.5,GD); doc.text(T(t).toUpperCase(),x,y); }
+  let y=band(true);
+  // cliente / detalles
+  label('Preparada para',M,y); label('Detalles',124,y); y+=5.5;
+  let yl=y, yr=y;
+  font('bold',12,INK); lines(q.cName,100).forEach(l=>{ doc.text(l,M,yl); yl+=5.4; });
+  font('normal',9.5,INK);
+  [q.cNit&&('NIT / C.C. '+q.cNit),q.cContact&&('Atención: '+q.cContact),q.cEmail,q.cPhone].filter(Boolean).forEach(t=>{ lines(t,100).forEach(l=>{ doc.text(l,M,yl); yl+=4.8; }); });
+  const until=(()=>{ try{ return ymd(new Date(parse(q.date).getTime()+((Number(q.valid)||15)*86400000))); }catch(e){ return ''; } })();
+  [['Fecha',longDate(q.date)],['Vigencia',(Number(q.valid)||15)+' días (hasta '+longDate(until)+')'],['Elaborada por',ex.name]].forEach(r=>{ font('bold',9,GRAY); doc.text(T(r[0])+':',124,yr); font('normal',9.5,INK); const ls=lines(r[1],R-124-29); ls.forEach((l,i)=>{ doc.text(l,124+29,yr+i*4.6); }); yr+=Math.max(1,ls.length)*4.6+1.2; });
+  y=Math.max(yl,yr)+5;
+  if(q.title){ font('bolditalic',13,INK); lines(q.title,R-M).forEach(l=>{ doc.text(l,M,y); y+=6; }); y+=1; }
+  // tabla
+  const CX={svc:M+3,mod:98,qty:128,unit:156,sub:R-3}, SW=78;
+  function thead(){ doc.setFillColor(...DARK); doc.rect(M,y,R-M,8,'F'); font('bold',7.5,[255,255,255]); doc.text('SERVICIO',CX.svc,y+5.2); doc.text('MODALIDAD',CX.mod,y+5.2); doc.text('CANT.',CX.qty,y+5.2,{align:'right'}); doc.text('VALOR UNIT.',CX.unit,y+5.2,{align:'right'}); doc.text('SUBTOTAL',CX.sub,y+5.2,{align:'right'}); y+=8; }
+  function newPage(){ doc.addPage(); y=band(false); thead(); }
+  function need(h){ if(y+h>LIM){ doc.addPage(); y=band(false)+4; } }
+  thead();
+  (q.items||[]).forEach(it=>{
+    if(y+24>LIM) newPage();
+    const y0=y, men=it.mode==='mensual', val=(Number(it.price)||0)*(Number(it.qty)||1);
+    y+=5.5;
+    font('normal',8.5,INK); doc.text(men?'Pago mensual':'Pago único',CX.mod,y0+5.5);
+    doc.text(String(Number(it.qty)||1),CX.qty,y0+5.5,{align:'right'}); doc.text(pdfMoney(it.price),CX.unit,y0+5.5,{align:'right'});
+    font('bold',9,INK); doc.text(pdfMoney(val)+(men?' /mes':''),CX.sub,y0+5.5,{align:'right'});
+    font('bold',9.5,INK); lines(it.name,SW).forEach(l=>{ if(y>LIM){ newPage(); y+=5.5; font('bold',9.5,INK); } doc.text(l,CX.svc,y); y+=4.6; });
+    if(it.desc){ font('normal',8.5,GRAY); lines(it.desc,SW).forEach(l=>{ if(y>LIM){ newPage(); y+=5.5; font('normal',8.5,GRAY); } doc.text(l,CX.svc,y); y+=4; }); }
+    y+=2.5; doc.setDrawColor(...LINE); doc.setLineWidth(0.2); doc.line(M,y,R,y);
+  });
+  // totales
+  const t=qTotals(q); y+=5; need(30);
+  const rows=[]; if(t.u) rows.push(['Total pago único',pdfMoney(t.u)]); if(t.m) rows.push(['Total mensual',pdfMoney(t.m)+' / mes']);
+  rows.forEach(r=>{ doc.setFillColor(...DARK); doc.roundedRect(112,y,R-112,10,1.5,1.5,'F'); font('normal',9,[210,210,204]); doc.text(r[0],116,y+6.4); font('bold',12,GREEN); doc.text(r[1],R-4,y+6.8,{align:'right'}); y+=12; });
+  font('normal',7.5,GRAY); doc.text('Valores en pesos colombianos (COP).',R,y+1,{align:'right'}); y+=8;
+  // condiciones
+  if(q.notes){ need(24); label('Condiciones y observaciones',M,y); y+=5; font('normal',9,INK); lines(q.notes,R-M).forEach(l=>{ if(y>LIM){ doc.addPage(); y=band(false)+4; font('normal',9,INK); } doc.text(l,M,y); y+=4.5; }); y+=4; }
+  // firma
+  need(34);
+  doc.setFillColor(...GREEN); doc.rect(M,y,22,1,'F'); y+=7;
+  font('normal',9.5,GRAY); doc.text('Atentamente,',M,y); y+=7;
+  font('bolditalic',12,INK); doc.text(T(ex.name),M,y); y+=5.2;
+  font('normal',9.5,INK);
+  [ex.cargo,E.nombre,(ex.phone||E.tel)&&('Tel. '+(ex.phone||E.tel)),(ex.email||E.email)].filter(Boolean).forEach(l=>{ doc.text(T(l),M,y); y+=4.7; });
+  // pie en todas las páginas
+  const n=doc.getNumberOfPages();
+  for(let i=1;i<=n;i++){
+    doc.setPage(i);
+    doc.setFillColor(...DARK); doc.rect(0,H-13,W,13,'F');
+    [[155,230,53],[109,194,26],[62,142,15]].forEach((c,k)=>{ doc.setFillColor(c[0],c[1],c[2]); doc.rect(k*W/3,H-14.2,W/3+0.3,1.2,'F'); });
