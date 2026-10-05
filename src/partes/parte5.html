@@ -7,6 +7,8 @@
 }
 
 /* ───────── prospección por correo ───────── */
+const CF=!!window.__DL_CF; /* versión web (Cloudflare): el correo sale por Resend en lugar de Gmail */
+const SENT_BOX=CF?'el panel de Resend':'la carpeta Enviados de Gmail';
 const PST={nuevo:['Por contactar',''],enviado:['Enviado','info'],respondio:['Respondió','ok'],interesado:['Interesado','ok'],nocontactar:['No contactar','bad'],rebotado:['Rebotado','bad'],error:['Error de envío','warn']};
 const PBLOCK=['nocontactar','rebotado','error','respondio','interesado'];
 const isEmail=e=>/^[^\s@,;<>]+@[^\s@,;<>]+\.[^\s@,;<>]{2,}$/.test(e);
@@ -43,7 +45,8 @@ function mailParts(camp,r){
   const opt='Si no desea recibir más mensajes de '+E.nombre+', responda este correo con la palabra BAJA y lo retiraremos de inmediato.';
   const label=esc(camp.btn||'Contáctenos');
   const btn=link?'<table cellpadding="0" cellspacing="0" border="0" align="center" style="margin:22px auto;width:auto"><tr><td bgcolor="#7ED321" style="border-radius:8px;width:auto"><a href="'+esc(link)+'" style="display:inline-block;padding:15px 38px;color:#0E0B0A;font-weight:bold;font-size:17px;text-decoration:none;font-family:Arial,Helvetica,sans-serif">'+label+'</a></td></tr></table>':'';
-  const htm='<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#222;text-align:center">'+btn+'<div style="font-size:12px;color:#555">'+esc(E.nombre)+'</div><br><div style="font-size:11px;color:#888">'+esc(opt)+'</div></div>';
+  const img=CF?'<div style="text-align:center"><img src="cid:propuesta" alt="" style="max-width:100%;height:auto;border-radius:8px"></div>':'';
+  const htm='<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#222;text-align:center">'+img+btn+'<div style="font-size:12px;color:#555">'+esc(E.nombre)+'</div><br><div style="font-size:11px;color:#888">'+esc(opt)+'</div></div>';
   const body=(link?(camp.btn||'Contáctenos')+' por WhatsApp: '+link+'\n\n':'')+E.nombre+'\n\n--\n'+opt;
   return {subject,body,htmlBody:htm};
 }
@@ -127,7 +130,7 @@ async function doImport(){
 function pSettingsForm(){
   const P=psetD();
   openModal({title:'Ajustes de envío',
-    body:'<p class="hint" style="margin:0">Gmail limita los envíos diarios (alrededor de 500 en cuentas personales y 2.000 en Google Workspace; confirme el límite vigente en la ayuda de Google). Si supera el límite, Gmail bloquea el envío por un tiempo. Para cuidar la reputación del correo, empiece con pocos envíos al día y suba poco a poco.</p>'
+    body:'<p class="hint" style="margin:0">'+(CF?'El servicio de correo (Resend) limita los envíos según su plan; el plan gratuito permite cerca de 100 correos al día (confirme el límite vigente en su cuenta de Resend). Para cuidar la reputación del dominio, empiece con pocos envíos al día y suba poco a poco.':'Gmail limita los envíos diarios (alrededor de 500 en cuentas personales y 2.000 en Google Workspace; confirme el límite vigente en la ayuda de Google). Si supera el límite, Gmail bloquea el envío por un tiempo. Para cuidar la reputación del correo, empiece con pocos envíos al día y suba poco a poco.')+'</p>'
      +'<div class="f3"><div class="fld"><label for="ps-cap">Máximo de correos por día</label><input class="inp num" id="ps-cap" type="number" min="1" max="400" value="'+P.cap+'"></div><div class="fld"><label for="ps-min">Pausa mínima (segundos)</label><input class="inp num" id="ps-min" type="number" min="5" max="300" value="'+P.dmin+'"></div><div class="fld"><label for="ps-max">Pausa máxima (segundos)</label><input class="inp num" id="ps-max" type="number" min="5" max="600" value="'+P.dmax+'"></div></div>'
      +'<div class="hint">La pausa aleatoria entre correos evita que el envío parezca automatizado. Con 100 correos y pausas de 10 a 25 segundos, la tanda dura cerca de 30 minutos.</div>',
     actions:[{label:'Cancelar',fn:()=>true},{label:'Guardar',kind:'pri',fn:async()=>{
@@ -147,7 +150,7 @@ function bajasForm(){
       toast(emails.length+' '+plural(emails.length,'correo registrado','correos registrados')+' como no contactar'); }}]});
 }
 /* campañas */
-const GM_MSG={needs_reauth:'La conexión con Gmail venció. Vuelva a conectarla en claude.ai: Configuración → Conectores.',server_not_connected:'Gmail no está conectado a su cuenta de Claude. Agréguelo en claude.ai: Configuración → Conectores.',selection_required:'Tiene más de un conector de Gmail. Elija cuál usar cuando la página se lo pida.',not_in_manifest:'No se autorizó el uso de Gmail en este tablero. Permítalo desde el menú Permisos del artefacto.',not_granted:'Esta vista no tiene permiso para usar Gmail.',capability_disabled:'El envío por Gmail no está disponible en esta vista.',capability_removed:'El envío por Gmail no está disponible en esta vista.',blocked_by_policy:'La política de su organización bloquea el envío de correos desde aquí.',approval_required:'Su organización exige aprobación para enviar correos; aún no es posible desde este tablero.',consent_required:'No se autorizó el uso de Gmail. Permítalo para continuar.',cancelled:'El envío fue cancelado.'};
+const GM_MSG={resend_not_configured:'El envío de correos aún no está configurado en Cloudflare (falta la clave de Resend o el correo remitente).',needs_reauth:'La conexión con Gmail venció. Vuelva a conectarla en claude.ai: Configuración → Conectores.',server_not_connected:'Gmail no está conectado a su cuenta de Claude. Agréguelo en claude.ai: Configuración → Conectores.',selection_required:'Tiene más de un conector de Gmail. Elija cuál usar cuando la página se lo pida.',not_in_manifest:'No se autorizó el uso de Gmail en este tablero. Permítalo desde el menú Permisos del artefacto.',not_granted:'Esta vista no tiene permiso para usar Gmail.',capability_disabled:'El envío por Gmail no está disponible en esta vista.',capability_removed:'El envío por Gmail no está disponible en esta vista.',blocked_by_policy:'La política de su organización bloquea el envío de correos desde aquí.',approval_required:'Su organización exige aprobación para enviar correos; aún no es posible desde este tablero.',consent_required:'No se autorizó el uso de Gmail. Permítalo para continuar.',cancelled:'El envío fue cancelado.'};
 const DEF_BODY='Hola {{nombre}},\n\nSoy {{remitente}}, de D&L Hnos. Lozano. Apoyamos a empresas como {{empresa}} con marketing digital: gestión de redes sociales, páginas web y tableros de seguimiento con inteligencia artificial.\n\nMe gustaría contarle en una llamada breve cómo podríamos ayudar a {{empresa}} a conseguir más clientes. ¿Le parece si coordinamos 15 minutos esta semana?\n\nQuedo atento a su respuesta.';
 let PC=null, PCfile=null;
 async function prepImage(file){
@@ -178,8 +181,8 @@ function campForm(camp){
   openModal({title:editing?'Editar campaña':'Nueva campaña de correo',wide:true,body,actions,onMount:root=>{
     let pu=PC.imageId?'/_blob/'+PC.imageId:'';
     const prev=()=>{ const rows=allRows().filter(r=>!PC.listId||r._l===PC.listId); const r=rows[0]||{n:'María',c:'Empresa de ejemplo'}; const m=mailParts(PC,r);
-      $('#pc-prev').innerHTML='<div style="margin-bottom:10px;padding-bottom:8px;border-bottom:1px solid #e5e5e0;color:#666;font-size:12px">Asunto: <b style="color:#111">'+esc(m.subject||'(sin asunto)')+'</b></div>'+m.htmlBody
-        +'<div style="margin-top:12px;border-top:1px solid #e5e5e0;padding-top:10px;color:#666;font-size:12px">Archivo adjunto: '+(pu?'<img src="'+esc(pu)+'" alt="" style="height:46px;vertical-align:middle;border-radius:4px;border:1px solid #ddd;margin-right:8px">':'<i>aún no ha elegido imagen</i>')+'</div>'; };
+      $('#pc-prev').innerHTML='<div style="margin-bottom:10px;padding-bottom:8px;border-bottom:1px solid #e5e5e0;color:#666;font-size:12px">Asunto: <b style="color:#111">'+esc(m.subject||'(sin asunto)')+'</b></div>'+(CF?m.htmlBody.replace('cid:propuesta',esc(pu)):m.htmlBody)
+        +(CF?'':'<div style="margin-top:12px;border-top:1px solid #e5e5e0;padding-top:10px;color:#666;font-size:12px">Archivo adjunto: '+(pu?'<img src="'+esc(pu)+'" alt="" style="height:46px;vertical-align:middle;border-radius:4px;border:1px solid #ddd;margin-right:8px">':'<i>aún no ha elegido imagen</i>')+'</div>'); };
     prev();
     root.addEventListener('input',e=>{ const k=e.target.dataset.pc; if(k){ PC[k]=e.target.value; prev(); } });
     root.addEventListener('change',async e=>{
@@ -222,7 +225,7 @@ function sendForm(camp){
   openModal({title:'Enviar campaña: '+camp.name,wide:true,
     body:'<div class="stats" style="grid-template-columns:repeat(3,minmax(0,1fr));margin:0">'+stat('Por contactar',String(el.length),'En «'+lname+'»','')+stat('Enviados hoy',sentToday(rows)+' de '+P.cap,'Cupo diario restante: '+left,left?'good':'hot')+stat('Pausa entre correos',P.dmin+'–'+P.dmax+' s','Se cambia en Ajustes de envío','')+'</div>'
      +'<div class="f2"><div class="fld"><label for="snd-n">Cuántos correos enviar ahora</label><input class="inp num" id="snd-n" type="number" min="1" value="'+Math.max(def,0)+'"><span class="hint">Mantenga esta ventana y la pestaña abiertas mientras dura el envío. Si la cierra, el envío se detiene y puede continuar después.</span></div>'
-     +'<div class="fld"><span class="lab">Antes de enviar</span><label style="display:flex;gap:8px;align-items:flex-start;font-size:13px;text-transform:none;letter-spacing:0;font-weight:500;color:var(--fg)"><input type="checkbox" id="snd-ok" style="margin-top:3px"><span>Confirmo que son empresas con las que tenemos un motivo comercial legítimo para escribir, que respetamos las bajas y que el mensaje se envía desde mi cuenta de Gmail.</span></label></div></div>'
+     +'<div class="fld"><span class="lab">Antes de enviar</span><label style="display:flex;gap:8px;align-items:flex-start;font-size:13px;text-transform:none;letter-spacing:0;font-weight:500;color:var(--fg)"><input type="checkbox" id="snd-ok" style="margin-top:3px"><span>Confirmo que son empresas con las que tenemos un motivo comercial legítimo para escribir, que respetamos las bajas y que el mensaje se envía desde '+(CF?'el correo de D&amp;L':'mi cuenta de Gmail')+'.</span></label></div></div>'
      +'<div id="snd-prog" class="hint"></div><div class="bar" style="height:8px"><i id="snd-bar" style="width:0"></i></div><div id="snd-log" style="max-height:200px;overflow:auto;font-size:12px;color:var(--muted);display:flex;flex-direction:column;gap:3px"></div>',
     actions:[{label:'Cerrar',fn:()=>{ if(SND) SND.stop=true; return true; }},{label:'Detener',id:'snd-stop',keep:true,fn:()=>{ if(SND){ SND.stop=true; const b=$('#snd-stop'); if(b) b.disabled=true; } }},{label:'Iniciar envío',kind:'pri',id:'snd-go',keep:true,fn:b=>startSend(camp,b)}],
     onMount:()=>{ $('#snd-stop').disabled=true; if(!S.mcp){ $('#snd-prog').textContent=GM_MSG.capability_disabled; $('#snd-go').disabled=true; } }});
@@ -256,10 +259,10 @@ async function startSend(camp,btn){
       if(code==='tool_error'){
         errs++; try{ await putRow(it._ck,it._i,{st:'error',err:msg.slice(0,160)}); }catch(e2){}
         log('Error con '+r.e+': '+msg.slice(0,120),'var(--bad)');
-        if(/limit|quota|exceed|rate|l[ií]mite/i.test(msg)||errs>=3){ reason='Gmail rechazó los envíos: '+msg.slice(0,160); break; }
+        if(/limit|quota|exceed|rate|l[ií]mite/i.test(msg)||errs>=3){ reason=(CF?'El servicio de correo rechazó los envíos: ':'Gmail rechazó los envíos: ')+msg.slice(0,160); break; }
       } else {
-        try{ await putRow(it._ck,it._i,{st:'error',err:'Resultado incierto: verifique en Enviados de Gmail'}); }catch(e2){}
-        reason='No se pudo confirmar el último envío (problema de conexión). Revise la carpeta Enviados de Gmail antes de continuar; ese contacto quedó marcado con error.'; break;
+        try{ await putRow(it._ck,it._i,{st:'error',err:'Resultado incierto: verifique en '+SENT_BOX}); }catch(e2){}
+        reason='No se pudo confirmar el último envío (problema de conexión). Revise '+SENT_BOX+' antes de continuar; ese contacto quedó marcado con error.'; break;
       }
     }
     if(q<queue.length-1&&!SND.stop){ const ms=(P.dmin+Math.random()*Math.max(0,P.dmax-P.dmin))*1000; for(let w=0;w<ms&&!SND.stop&&$('#snd-log');w+=250) await sleep(250); }
@@ -274,7 +277,7 @@ function drawPros(){
   const rows=allRows(), lists=getLists(rows), P=psetD(), v=S.pview==='bases'?'bases':'camp';
   const n=rows.filter(r=>r._l!=='bajas').length, nuevos=rows.filter(r=>r.st==='nuevo').length, hoy=sentToday(rows), int=rows.filter(r=>r.st==='interesado'||r.st==='respondio').length;
   let h=head('<button class="btn pri" data-act="p-import" type="button">+ Importar base de datos</button>');
-  h+='<div style="margin-bottom:6px"><h1>Prospección</h1><div class="hint" style="margin-top:4px">Suba bases de empresas y envíe correos de presentación desde su Gmail, con límites diarios y registro de cada contacto.</div></div>'+navTabs();
+  h+='<div style="margin-bottom:6px"><h1>Prospección</h1><div class="hint" style="margin-top:4px">Suba bases de empresas y envíe correos de presentación '+(CF?'desde el correo de D&amp;L':'desde su Gmail')+', con límites diarios y registro de cada contacto.</div></div>'+navTabs();
   h+='<section class="stats" aria-label="Prospección">'+stat('Contactos',String(n),lists.filter(l=>l.id!=='bajas').length+' '+plural(lists.filter(l=>l.id!=='bajas').length,'base','bases'),'')+stat('Por contactar',String(nuevos),'Aún sin correo','')+stat('Enviados hoy',hoy+' de '+P.cap,'Cupo diario de envío',hoy>=P.cap?'hot':'good')+stat('Respondieron o interesados',String(int),'Márquelos en la lista de contactos','good')+'</section>';
   h+='<div class="svc" style="margin-bottom:16px"><button type="button" data-act="pview" data-v="camp" aria-pressed="'+(v==='camp')+'">Campañas · '+S.camps.length+'</button><button type="button" data-act="pview" data-v="bases" aria-pressed="'+(v==='bases')+'">Bases de datos · '+lists.length+'</button></div>';
   if(v==='camp'){
@@ -328,12 +331,12 @@ function boot(){
   const cl=window.claude;
   if(!cl||!cl.use){ S.err='Este tablero debe abrirse desde claude.ai para guardar los datos.'; draw(); return; }
   Promise.all([cl.use('db'),cl.use('assets'),cl.use('downloads').catch(()=>null),cl.use('mcp').catch(()=>null)]).then(([db,assets,dl,mcp])=>{
-    if(!db){ S.err='No se pudo conectar con el almacenamiento. Inicie sesión en claude.ai y recargue la página.'; draw(); return; }
+    if(!db){ S.err=window.__DL_ERR||'No se pudo conectar con el almacenamiento. Inicie sesión en claude.ai y recargue la página.'; draw(); return; }
     S.db=db; S.assets=assets||null; S.dl=dl||null; S.mcp=mcp||null;
     const sub=(name,key,field)=>db.collection(name).onSnapshot(snap=>{ S[field]=snap.docs.map(d=>Object.assign({id:d.id},d.data())); S.loaded[key]=true; render(); },e=>{ S.err='Se perdió la conexión con los datos ('+(e&&e.code||'error')+').'; render(); });
     sub('clients','c','clients'); sub('tasks','t','tasks'); sub('payments','p','pays'); sub('expenses','e','exps'); sub('quotes','q','quotes'); sub('products','r','prods'); sub('contacts','k','chunks'); sub('campaigns','g','camps');
     db.collection('settings').onSnapshot(snap=>{ const d=snap.docs.find(x=>x.id==='caja'); S.caja=d?d.data():null; const em=snap.docs.find(x=>x.id==='empresa'); S.empresa=em?em.data():null; const ps=snap.docs.find(x=>x.id==='prospeccion'); S.pset=ps?ps.data():null; S.loaded.s=true; render(); },e=>{ S.loaded.s=true; render(); });
-  }).catch(()=>{ S.err='No se pudo iniciar el tablero.'; draw(); });
+  }).catch(()=>{ S.err=window.__DL_ERR||'No se pudo iniciar el tablero.'; draw(); });
 }
 boot();
 })();
