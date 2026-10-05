@@ -3,6 +3,7 @@
   "name": "hnos-lozano-control-de-clientes",
   "main": "worker/index.js",
   "compatibility_date": "2025-09-01",
+  "workers_dev": true,
   "build": { "command": "node build.mjs" },
   "assets": {
     "directory": "./dist",
