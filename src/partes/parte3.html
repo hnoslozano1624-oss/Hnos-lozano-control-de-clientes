@@ -1,0 +1,341 @@
+  const ini=String((c&&c.name)||'?').trim().split(/\s+/).slice(0,2).map(w=>w.charAt(0)).join('').toUpperCase();
+  return '<span class="'+cls+' ini" aria-hidden="true">'+esc(ini)+'</span>';
+}
+
+function dueChip(t){
+  if(!t.due) return '';
+  const d=dayDiff(t.due,todayS());
+  if(t.done) return '<span class="pill">'+fmtD(t.due)+'</span>';
+  if(d<0) return '<span class="pill bad">Vencida · '+fmtD(t.due)+'</span>';
+  if(d===0) return '<span class="pill warn">Hoy</span>';
+  if(d<=3) return '<span class="pill warn">'+fmtD(t.due)+'</span>';
+  return '<span class="pill">'+fmtD(t.due)+'</span>';
+}
+function ownerPill(o){ return o?'<span class="pill '+(o==='Diego'?'diego':'laura')+'">'+esc(o)+'</span>':''; }
+function tabSeg(c,s){
+  const pend=s.ts.filter(t=>!t.done).sort((a,b)=>(a.due||'9999').localeCompare(b.due||'9999'));
+  let h='<div class="toolbar"><h2>Plan de trabajo pendiente</h2><button class="btn sm" data-act="add-task" type="button">+ Agregar tarea</button></div>';
+  if(!pend.length) h+='<div class="empty">'+(s.all?'Todas las tareas están cumplidas. Revise la pestaña Ejecutado.':'Este cliente no tiene tareas. Agregue la primera.')+'</div>';
+  pend.forEach(t=>{
+    h+='<div class="task"><button class="chk" data-act="complete-task" data-id="'+esc(t.id)+'" type="button" aria-label="Marcar como cumplida: '+esc(t.title)+'"><svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 7.5l3 3 6-7"/></svg></button>'
+     +'<div class="r-main"><div class="r-title">'+esc(t.title)+'</div><div class="meta">'+dueChip(t)+ownerPill(t.owner)+supportHTML(t)+'</div>'+(t.notes?'<div class="r-sub" style="margin-top:4px">'+esc(t.notes)+'</div>':'')+'</div>'
+     +'<button class="btn sm" data-act="edit-task" data-id="'+esc(t.id)+'" type="button">Editar</button></div>';
+  });
+  return h;
+}
+function tabDone(c,s){
+  const d=s.ts.filter(t=>t.done).sort((a,b)=>(b.doneAt||'').localeCompare(a.doneAt||''));
+  if(!d.length) return '<div class="empty">Las tareas cumplidas se archivan aquí con su fecha y soporte.</div>';
+  let h='<div class="toolbar"><h2>Hoja de ejecutado</h2><span class="hint">'+d.length+' '+plural(d.length,'tarea cumplida','tareas cumplidas')+'</span></div><div class="tbl-wrap"><table><thead><tr><th>Tarea</th><th>Responsable</th><th>Fecha pactada</th><th>Cumplida</th><th>Soporte</th><th></th></tr></thead><tbody>';
+  d.forEach(t=>{ h+='<tr><td style="font-weight:600;min-width:200px">'+esc(t.title)+'</td><td>'+ownerPill(t.owner)+'</td><td class="num">'+fmtD(t.due)+'</td><td class="num">'+fmtD(t.doneAt)+(t.due&&t.doneAt&&dayDiff(t.doneAt,t.due)>0?' <span class="pill warn">+'+dayDiff(t.doneAt,t.due)+' d</span>':'')+'</td><td>'+(supportHTML(t)||'<span class="hint">—</span>')+'</td><td style="text-align:right"><button class="link" data-act="reopen-task" data-id="'+esc(t.id)+'" type="button">Reabrir</button></td></tr>'; });
+  return h+'</tbody></table></div>';
+}
+function payPill(p,c){
+  const st=payState(p), a=payAlert(p,c);
+  if(st==='pagado') return '<span class="pill ok">Pagado</span>';
+  if(st==='facturado') return '<span class="pill '+(a?'bad':'info')+'">'+(a?a.text:'Facturado, esperando pago')+'</span>';
+  return '<span class="pill '+(a?a.lvl:'')+'">'+(a?a.text:'Por facturar')+'</span>';
+}
+function payCard(p,c){
+  const st=payState(p), a=payAlert(p,c), t=todayS();
+  const billLate=!p.invoiced&&dayDiff(p.billDate,t)<0, billSoon=!p.invoiced&&a&&a.kind==='bill'&&!billLate;
+  let h='<article class="pay '+(st==='pagado'?'done':'')+'"><div class="pay-h"><div style="min-width:0"><h3>'+esc(p.label)+'</h3><div class="meta">'+payPill(p,c)+'</div></div><div class="pay-amt num">'+money(p.amount)+'</div></div>';
+  h+='<div class="steps">';
+  h+='<div class="step done"><span class="dot"></span><div><div class="t">Programado</div><div class="d">Facturar el '+fmtD(p.billDate)+(p.dueDate?' · pago esperado '+fmtD(p.dueDate):'')+'</div></div></div>';
+  if(p.invoiced) h+='<div class="step done"><span class="dot"></span><div><div class="t">'+(p.docType==='cuenta'?'Cuenta de cobro emitida':'Facturado')+(p.invoiceNo?' · N.º <span class="mono">'+esc(p.invoiceNo)+'</span>':'')+'</div><div class="d">'+fmtD(p.invoiceDate)+'</div><div class="meta">'+supportHTML({link:p.invoiceLink,fileId:p.invoiceFileId,fileName:p.invoiceFileName,fileType:p.invoiceFileType})+'</div></div></div>';
+  else h+='<div class="step '+(billLate?'late':(billSoon?'soon':''))+'"><span class="dot"></span><div><div class="t">Falta emitir factura o cuenta de cobro</div><div class="d">'+(billLate?'Debió facturarse el '+fmtD(p.billDate):'Fecha de facturación: '+fmtD(p.billDate))+'</div></div></div>';
+  if(p.received) h+='<div class="step done"><span class="dot"></span><div><div class="t">Dinero recibido · '+money(p.receivedAmount!=null?p.receivedAmount:p.amount)+'</div><div class="d">'+fmtD(p.receivedDate)+(p.receivedNote?' · '+esc(p.receivedNote):'')+'</div></div></div>';
+  else h+='<div class="step '+(a&&a.kind==='pay'?'late':'')+'"><span class="dot"></span><div><div class="t">Pendiente de cobro</div><div class="d">'+(p.dueDate?'Pago esperado '+fmtD(p.dueDate):'Sin fecha de pago esperada')+'</div></div></div>';
+  h+='</div><div class="pay-acts">';
+  if(!p.invoiced) h+='<button class="btn sm pri" data-act="invoice" data-id="'+esc(p.id)+'" type="button">Registrar factura o cuenta de cobro</button>';
+  else h+='<button class="btn sm" data-act="invoice" data-id="'+esc(p.id)+'" type="button">Editar '+(p.docType==='cuenta'?'cuenta de cobro':'factura')+'</button>';
+  h+='<button class="recv" data-act="'+(p.received?'unreceive':'receive')+'" data-id="'+esc(p.id)+'" type="button" '+(!p.invoiced&&!p.received?'disabled title="Registre primero la factura o cuenta de cobro"':'')+'><span class="chk '+(p.received?'on':'')+'"><svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 7.5l3 3 6-7"/></svg></span>'+(p.received?'Dinero recibido':'Ya entró el dinero')+'</button>';
+  h+='<button class="link" data-act="edit-pay" data-id="'+esc(p.id)+'" type="button">Editar pago</button></div>';
+  if((p.log||[]).length) h+='<details class="hist"><summary>Historial ('+p.log.length+')</summary><ul>'+p.log.slice().reverse().map(l=>'<li>'+esc(fmtTS(l.at))+' · '+esc(l.text)+'</li>').join('')+'</ul></details>';
+  return h+'</article>';
+}
+function tabPay(c,s){
+  const pend=s.ps.filter(p=>!p.received), done=s.ps.filter(p=>p.received);
+  let h='<div class="pay-sum">'+stat(c.payMode==='mensual'?'Programado':'Total acordado',money(s.total),s.ps.length+' '+plural(s.ps.length,'pago','pagos'),'')
+   +stat('Cobrado',money(s.paid),done.length+' '+plural(done.length,'cobro recibido','cobros recibidos'),'')
+   +stat('Cuentas por cobrar',money(s.mes),s.atras?'Pago pendiente del cliente; incluye '+money(s.atras)+' vencido':'Pago pendiente del cliente este mes',s.atras?'warm':'')
+   +stat('Cuentas por cobrar del contrato',money(s.saldo),pend.length+' '+plural(pend.length,'cobro por recibir','cobros por recibir')+' en total','')+'</div>';
+  h+='<div class="cond">'+esc(c.payMode==='mensual'?'Pago mensual de '+money(c.monthly)+', se factura el día '+c.billDay+' de cada mes.':'Pago por abonos: anticipo al iniciar y saldo contra entrega.')+' Aviso de facturación '+(c.alertDays!=null?c.alertDays:3)+' días antes. Documento de cobro habitual: '+(c.docType==='cuenta'?'cuenta de cobro':'factura')+'.</div>';
+  h+='<div class="toolbar"><h2>Por cobrar</h2><span style="display:flex;gap:8px">'+(c.payMode==='mensual'?'<button class="btn sm" data-act="next-month" type="button">+ Agregar mes</button>':'')+'<button class="btn sm" data-act="add-pay" type="button">+ Agregar pago</button></span></div>';
+  h+=pend.length?pend.map(p=>payCard(p,c)).join(''):'<div class="empty">No hay cobros pendientes.</div>';
+  h+='<div class="toolbar" style="margin-top:24px"><h2>Cobrados</h2></div>';
+  h+=done.length?done.slice().sort((a,b)=>(b.receivedDate||'').localeCompare(a.receivedDate||'')).map(p=>payCard(p,c)).join(''):'<div class="empty">Cuando marque un pago como recibido aparecerá aquí con su trazabilidad.</div>';
+  return h;
+}
+function tabInfo(c,s,terms){
+  return '<div class="panel" style="max-width:720px"><div class="kv" style="margin-bottom:8px"><span>Contacto</span><span>'+esc(c.contact||'—')+'</span></div><div class="kv" style="margin-bottom:8px"><span>Servicios</span><span>'+((c.services||[]).map(k=>esc((SERVICES[k]||{}).label||k)).join(', ')||'—')+'</span></div><div class="kv" style="margin-bottom:8px"><span>Inicio / entrega</span><span>'+fmtD(c.startDate)+' / '+fmtD(c.endDate)+'</span></div><div class="kv" style="margin-bottom:8px"><span>Estado</span><span>'+(c.status==='cerrado'?'Inactivo':'Activo')+'</span></div><p class="hint" style="margin:12px 0 16px">'+esc(terms)+'</p><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" data-act="edit-client" type="button">Editar datos</button><button class="btn" data-act="toggle-status" type="button">'+(c.status==='cerrado'?'Reactivar cliente':'Marcar como inactivo')+'</button><button class="btn danger" data-act="delete-client" type="button">Eliminar cliente</button></div></div>';
+}
+
+/* ───────── acciones ───────── */
+document.addEventListener('click',e=>{
+  const el=e.target.closest('[data-act]'); if(!el||!$('#app').contains(el)) return;
+  act(el.dataset.act,el.dataset,el);
+});
+document.addEventListener('keydown',e=>{ if((e.key==='Enter'||e.key===' ')&&e.target.matches('.row.click')){ e.preventDefault(); e.target.click(); } });
+
+function act(a,d){
+  const c=S.cid?clientById(S.cid):null;
+  switch(a){
+    case 'home': S.view='cli'; S.cid=null; render(); window.scrollTo(0,0); break;
+    case 'nav': S.view=d.v; S.cid=null; if(d.v==='pros'&&S.pview==='list') S.pview='bases'; render(); break;
+    case 'prio': S.prio=d.o; render(); break;
+    case 'g-prev': case 'g-next': { const q=(S.gMonth||todayS().slice(0,7)).split('-').map(Number); const n=new Date(q[0],q[1]-1+(a==='g-next'?1:-1),1); S.gMonth=n.getFullYear()+'-'+pad(n.getMonth()+1); render(); break; }
+    case 'g-now': S.gMonth=todayS().slice(0,7); render(); break;
+    case 'g-sep': S.gMonth=todayS().slice(0,4)+'-09'; render(); break;
+    case 'cfilter': S.cfilter=d.f; render(); break;
+    case 'approve-quote': approveQuote(S.quotes.find(x=>x.id===d.id)).catch(fail); break;
+    case 'quote-client': startFromQuote(S.quotes.find(x=>x.id===d.id)); break;
+    case 'pview': S.pview=d.v; S.ppage=0; render(); break;
+    case 'p-import': importForm(); break;
+    case 'p-newcamp': campForm(null); break;
+    case 'p-editcamp': campForm(S.camps.find(x=>x.id===d.id)); break;
+    case 'p-send': sendForm(S.camps.find(x=>x.id===d.id)); break;
+    case 'p-settings': pSettingsForm(); break;
+    case 'p-bajas': bajasForm(); break;
+    case 'p-list': S.pview='list'; S.plist=d.id; S.ppage=0; S.pfilter='todos'; S.psearch=''; render(); window.scrollTo(0,0); break;
+    case 'p-dellist': pDelList(d.id); break;
+    case 'p-filter': S.pfilter=d.f; S.ppage=0; render(); break;
+    case 'p-page': S.ppage=Math.max(0,(S.ppage||0)+Number(d.d)); render(); break;
+    case 'p-quote': { const ch=S.chunks.find(x=>x.id===d.ck), r=ch&&ch.rows[Number(d.i)]; if(r){ S.view='cot'; render(); quoteForm(null,{cName:r.c||r.n||'',cContact:r.n||'',cEmail:r.e}); } break; }
+    case 'new-prod': productForm(null); break;
+    case 'edit-prod': productForm(S.prods.find(x=>x.id===d.id)); break;
+    case 'new-quote': quoteForm(null); break;
+    case 'edit-quote': quoteForm(S.quotes.find(x=>x.id===d.id)); break;
+    case 'pdf-quote': pdfQuote(S.quotes.find(x=>x.id===d.id)); break;
+    case 'company': companyForm(); break;
+    case 'add-exp': expenseForm(null); break;
+    case 'add-pend': expenseForm(null,'pendiente'); break;
+    case 'add-proj': { const cm=todayS().slice(0,7), mm=S.gMonth||cm; expenseForm(null,mm<cm?'pagado':'pendiente',mm===cm?todayS():(mm+'-01')); break; }
+    case 'rec-copy': copyRecurring(S.gMonth||todayS().slice(0,7)).catch(fail); break;
+    case 'edit-caja': cajaForm(); break;
+    case 'reembolso': expenseForm(null,'pagado',todayS(),{kind:'reembolso',socio:d.k,source:'caja'}); break;
+    case 'pay-exp': payExpForm(S.exps.find(x=>x.id===d.id)); break;
+    case 'edit-exp': expenseForm(S.exps.find(x=>x.id===d.id)); break;
+    case 'open-client': S.view='client'; S.cid=d.id; S.tab=d.tab||'seg'; render(); window.scrollTo(0,0); break;
+    case 'tab': S.tab=d.tab; render(); break;
+    case 'new-client': clientForm(null); break;
+    case 'edit-client': clientForm(c); break;
+    case 'toggle-status': patchDoc('clients',c.id,{status:c.status==='cerrado'?'activo':'cerrado'}).then(()=>toast(c.status==='cerrado'?'Cliente reactivado':'Cliente marcado como inactivo')).catch(fail); break;
+    case 'delete-client': confirmDelete(c); break;
+    case 'add-task': taskForm(null); break;
+    case 'edit-task': taskForm(S.tasks.find(t=>t.id===d.id)); break;
+    case 'complete-task': completeForm(S.tasks.find(t=>t.id===d.id)); break;
+    case 'reopen-task': patchDoc('tasks',d.id,{done:false,doneAt:null}).then(()=>toast('Tarea reabierta')).catch(fail); break;
+    case 'add-pay': payForm(null); break;
+    case 'edit-pay': payForm(S.pays.find(p=>p.id===d.id)); break;
+    case 'next-month': monthForm(c); break;
+    case 'invoice': invoiceForm(S.pays.find(p=>p.id===d.id)); break;
+    case 'receive': receiveForm(S.pays.find(p=>p.id===d.id)); break;
+    case 'unreceive': { const p=S.pays.find(x=>x.id===d.id); patchDoc('payments',p.id,{received:false,receivedDate:null,receivedAmount:null,receivedNote:null,log:logEntry(p,'Pago revertido a pendiente')}).then(()=>toast('Pago revertido')).catch(fail); break; }
+  }
+}
+
+function confirmDelete(c){
+  openModal({title:'Eliminar cliente',body:'<p style="margin:0">Se eliminarán <b>'+esc(c.name)+'</b>, sus tareas y su plan de pagos. Esta acción no se puede deshacer. Si solo terminó el trabajo, use Marcar como inactivo para conservar el historial.</p>',
+    actions:[{label:'Cancelar',fn:()=>true},{label:'Eliminar definitivamente',kind:'danger armed',fn:async()=>{
+      for(const t of tasksOf(c.id)) await delDoc('tasks',t.id);
+      for(const p of paysOf(c.id)) await delDoc('payments',p.id);
+      await delDoc('clients',c.id); S.view='cli'; S.cid=null; render(); toast('Cliente eliminado'); }}]});
+}
+
+/* tareas */
+function taskForm(t){
+  const o=t||{owner:'Laura',due:'',title:'',notes:''};
+  openModal({title:t?'Editar tarea':'Nueva tarea',
+    body:'<div class="fld"><label for="tk-title">Tarea o entregable</label><input class="inp" id="tk-title" value="'+esc(o.title)+'"></div>'
+     +'<div class="f2"><div class="fld"><label for="tk-due">Fecha de entrega</label><input class="inp" id="tk-due" type="date" value="'+esc(o.due||'')+'"></div><div class="fld"><label for="tk-owner">Responsable</label><select class="inp" id="tk-owner"><option'+(o.owner==='Laura'?' selected':'')+'>Laura</option><option'+(o.owner==='Diego'?' selected':'')+'>Diego</option></select></div></div>'
+     +'<div class="fld"><label for="tk-notes">Notas (opcional)</label><input class="inp" id="tk-notes" value="'+esc(o.notes||'')+'"></div>'+supportFields('tk',o),
+    actions:[...(t?[{label:'Eliminar',kind:'danger',fn:async()=>{ await delDoc('tasks',t.id); toast('Tarea eliminada'); }}]:[]),{label:'Cancelar',fn:()=>true},{label:'Guardar',kind:'pri',fn:async()=>{
+      const title=$('#tk-title').value.trim(); if(!title){ toast('Escriba el nombre de la tarea.'); return false; }
+      const up=await uploadFile($('#tk-file')&&$('#tk-file').files[0]);
+      const data={clientId:S.cid,title,due:$('#tk-due').value||'',owner:$('#tk-owner').value,notes:$('#tk-notes').value.trim(),link:$('#tk-link').value.trim()};
+      if(up) Object.assign(data,up);
+      if(t) await patchDoc('tasks',t.id,data); else await saveDoc('tasks',null,Object.assign({done:false,createdAt:new Date().toISOString()},data));
+      toast('Tarea guardada'); }}]});
+}
+function completeForm(t){
+  openModal({title:'Marcar como cumplida',
+    body:'<p style="margin:0;font-weight:600">'+esc(t.title)+'</p><div class="fld"><label for="cp-date">Fecha de cumplimiento</label><input class="inp" id="cp-date" type="date" value="'+todayS()+'"></div>'+supportFields('cp',t,'Imagen o PDF que respalde la entrega')+'<p class="hint" style="margin:0">La tarea pasa a la pestaña Ejecutado con su soporte.</p>',
+    actions:[{label:'Cancelar',fn:()=>true},{label:'Marcar cumplida',kind:'pri',fn:async()=>{
+      const up=await uploadFile($('#cp-file')&&$('#cp-file').files[0]);
+      const data={done:true,doneAt:$('#cp-date').value||todayS(),link:$('#cp-link').value.trim()}; if(up) Object.assign(data,up);
+      await patchDoc('tasks',t.id,data); toast('Tarea movida a Ejecutado'); }}]});
+}
+
+/* pagos */
+function payForm(p){
+  const o=p||{label:'',amount:0,billDate:todayS(),dueDate:''};
+  openModal({title:p?'Editar pago':'Agregar pago',
+    body:'<div class="fld"><label for="py-label">Concepto</label><input class="inp" id="py-label" placeholder="Ej. Abono adicional" value="'+esc(o.label)+'"></div>'
+     +'<div class="fld"><label for="py-amt">Valor a cobrar (COP)</label><input class="inp num" id="py-amt" inputmode="numeric" value="'+grp(o.amount)+'"></div>'
+     +'<div class="f2"><div class="fld"><label for="py-bill">Fecha de facturación</label><input class="inp" id="py-bill" type="date" value="'+esc(o.billDate||'')+'"></div><div class="fld"><label for="py-due">Pago esperado</label><input class="inp" id="py-due" type="date" value="'+esc(o.dueDate||'')+'"></div></div>'
+     +(p?'':'<div class="f3"><div class="fld"><label for="py-st">Estado actual</label><select class="inp" id="py-st">'+stOpts('porfacturar')+'</select></div><div class="fld" id="py-invbox"><label for="py-inv">N.º de factura</label><input class="inp mono" id="py-inv"></div><div class="fld" id="py-rbox"><label for="py-rdate">Fecha en que ingresó</label><input class="inp" id="py-rdate" type="date" value="'+todayS()+'"></div></div><div class="fld" id="py-docbox" style="max-width:260px"><label for="py-doc">Tipo de documento</label><select class="inp" id="py-doc">'+docOpts((clientById(S.cid)||{}).docType)+'</select></div><p class="hint" style="margin:0">Use "Ya facturado" o "Ya pagado" para registrar pagos de meses anteriores.</p>'),
+    onMount:()=>{ $('#py-amt').addEventListener('change',e=>{ e.target.value=grp(num(e.target.value)); }); const st=$('#py-st'); if(st){ const sync=()=>{ $('#py-docbox').style.visibility=st.value==='porfacturar'?'hidden':'visible'; $('#py-invbox').style.visibility=st.value==='porfacturar'?'hidden':'visible'; $('#py-rbox').style.visibility=st.value==='pagado'?'visible':'hidden'; }; st.addEventListener('change',sync); sync(); } },
+    actions:[...(p?[{label:'Eliminar',kind:'danger',fn:async()=>{ await delDoc('payments',p.id); toast('Pago eliminado'); }}]:[]),{label:'Cancelar',fn:()=>true},{label:'Guardar',kind:'pri',fn:async()=>{
+      const label=$('#py-label').value.trim(), amount=num($('#py-amt').value), bill=$('#py-bill').value;
+      if(!label||!amount||!bill){ toast('Complete concepto, valor y fecha de facturación.'); return false; }
+      const data={clientId:S.cid,label,amount,billDate:bill,dueDate:$('#py-due').value||bill};
+      if(p) await patchDoc('payments',p.id,Object.assign(data,{log:logEntry(p,'Pago editado')}));
+      else { const now=new Date().toISOString(), stv=$('#py-st').value, sd=statusData(stv,Object.assign({inv:$('#py-inv').value.trim(),doc:$('#py-doc').value},data),now);
+        if(stv==='pagado'&&$('#py-rdate').value){ sd.receivedDate=$('#py-rdate').value; }
+        await saveDoc('payments',null,Object.assign({kind:'abono',seq:paysOf(S.cid).length+1,createdAt:now},data,sd)); }
+      toast('Pago guardado'); }}]});
+}
+function monthForm(c){
+  const ms=paysOf(c.id).filter(p=>p.kind==='mensual');
+  let def=todayS().slice(0,7);
+  if(ms.length){ const d=parse(ms[ms.length-1].billDate); const n=new Date(d.getFullYear(),d.getMonth()+1,1); def=n.getFullYear()+'-'+pad(n.getMonth()+1); }
+  else if(c.startDate) def=c.startDate.slice(0,7);
+  openModal({title:'Agregar mes de cobro',
+    body:'<p class="hint" style="margin:0">Use esta opción para registrar un mes anterior (por ejemplo septiembre) o programar el siguiente.</p>'
+     +'<div class="f2"><div class="fld"><label for="mf-month">Mes</label><input class="inp" id="mf-month" type="month" value="'+def+'"></div><div class="fld"><label for="mf-amt">Valor (COP)</label><input class="inp num" id="mf-amt" inputmode="numeric" value="'+grp(c.monthly||(ms.length?ms[ms.length-1].amount:0))+'"></div></div>'
+     +'<div class="f3"><div class="fld"><label for="mf-st">Estado actual</label><select class="inp" id="mf-st">'+stOpts('porfacturar')+'</select></div><div class="fld" id="mf-docbox"><label for="mf-doc">Tipo de documento</label><select class="inp" id="mf-doc">'+docOpts(c.docType)+'</select></div><div class="fld" id="mf-invbox"><label for="mf-inv">N.º de documento</label><input class="inp mono" id="mf-inv"></div></div>'
+     +'<div class="fld" id="mf-rbox" style="max-width:260px"><label for="mf-rdate">Fecha en que ingresó el dinero</label><input class="inp" id="mf-rdate" type="date"></div>',
+    onMount:()=>{ $('#mf-amt').addEventListener('change',e=>{ e.target.value=grp(num(e.target.value)); }); const st=$('#mf-st'); const sync=()=>{ const v=st.value; $('#mf-docbox').style.visibility=v==='porfacturar'?'hidden':'visible'; $('#mf-invbox').style.visibility=v==='porfacturar'?'hidden':'visible'; $('#mf-rbox').style.display=v==='pagado'?'flex':'none'; }; st.addEventListener('change',sync); sync(); },
+    actions:[{label:'Cancelar',fn:()=>true},{label:'Agregar mes',kind:'pri',fn:async()=>{
+      const mv=$('#mf-month').value, amount=num($('#mf-amt').value); if(!mv||!amount){ toast('Indique el mes y el valor.'); return false; }
+      const q=mv.split('-').map(Number), day=Math.min(c.billDay||(c.startDate?Number(c.startDate.slice(8,10)):1)||1,new Date(q[0],q[1],0).getDate());
+      const bill=q[0]+'-'+pad(q[1])+'-'+pad(day);
+      if(ms.some(x=>x.billDate.slice(0,7)===mv)){ toast('Ese mes ya está registrado.'); return false; }
+      const now=new Date().toISOString(), due=addDays(bill,c.term!=null?c.term:0), stv=$('#mf-st').value;
+      const base={clientId:c.id,kind:'mensual',label:'Mensualidad '+monthName(q[0],q[1]),amount,billDate:bill,dueDate:due,seq:ms.length+1,createdAt:now};
+      const sd=statusData(stv,Object.assign({inv:$('#mf-inv').value.trim(),doc:$('#mf-doc').value},base),now);
+      if(stv==='pagado'&&$('#mf-rdate').value) sd.receivedDate=$('#mf-rdate').value;
+      await saveDoc('payments',null,Object.assign(base,sd)); toast('Mes agregado'); }}]});
+}
+async function nextMonth(c){
+  const ms=paysOf(c.id).filter(p=>p.kind==='mensual'); if(!ms.length){ payForm(null); return; }
+  const last=ms[ms.length-1], d=parse(last.billDate); let y=d.getFullYear(), m=d.getMonth()+2; if(m>12){m=1;y++;}
+  const bill=y+'-'+pad(m)+'-'+pad(Math.min(c.billDay||d.getDate(),new Date(y,m,0).getDate()));
+  try{ await saveDoc('payments',null,{clientId:c.id,kind:'mensual',label:'Mensualidad '+monthName(y,m),amount:c.monthly||last.amount,billDate:bill,dueDate:addDays(bill,c.term!=null?c.term:0),invoiced:false,received:false,seq:ms.length+1,createdAt:new Date().toISOString(),log:[{at:new Date().toISOString(),text:'Pago programado'}]}); toast('Mes agregado'); }catch(err){ fail(err); }
+}
+function invoiceForm(p){
+  const c=clientById(p.clientId)||{}, dt=p.docType||c.docType||'factura';
+  openModal({title:p.invoiced?'Editar '+(dt==='cuenta'?'cuenta de cobro':'factura'):'Registrar factura o cuenta de cobro',
+    body:'<p style="margin:0;font-weight:600">'+esc(p.label)+' · '+money(p.amount)+'</p>'
+     +'<div class="fld"><label for="iv-type">Tipo de documento</label><select class="inp" id="iv-type">'+docOpts(dt)+'</select></div>'
+     +'<div class="f2"><div class="fld"><label for="iv-no" id="iv-nolab">N.º de factura</label><input class="inp mono" id="iv-no" value="'+esc(p.invoiceNo||'')+'"></div><div class="fld"><label for="iv-date">Fecha del documento</label><input class="inp" id="iv-date" type="date" value="'+esc(p.invoiceDate||todayS())+'"></div></div>'
+     +supportFields('iv',{link:p.invoiceLink,fileId:p.invoiceFileId,fileName:p.invoiceFileName},'Documento (PDF o imagen)')+'<p class="hint" style="margin:0">Indique el número, o suba el documento, o ambos.</p>',
+    onMount:()=>{ const sync=()=>{ $('#iv-nolab').textContent='N.º de '+($('#iv-type').value==='cuenta'?'cuenta de cobro':'factura'); }; $('#iv-type').addEventListener('change',sync); sync(); },
+    actions:[...(p.invoiced?[{label:'Quitar documento',kind:'danger',fn:async()=>{ await patchDoc('payments',p.id,{invoiced:false,invoiceNo:null,invoiceDate:null,invoiceLink:null,invoiceFileId:null,invoiceFileName:null,invoiceFileType:null,docType:null,log:logEntry(p,docLabel(p.docType)+' retirada')}); toast('Documento retirado'); }}]:[]),{label:'Cancelar',fn:()=>true},{label:'Guardar',kind:'pri',fn:async()=>{
+      const no=$('#iv-no').value.trim(), link=$('#iv-link').value.trim(), file=$('#iv-file')&&$('#iv-file').files[0], ty=$('#iv-type').value;
+      if(!no&&!link&&!file&&!p.invoiceFileId){ toast('Indique el número o adjunte el documento.'); return false; }
+      const up=await uploadFile(file);
+      const data={invoiced:true,docType:ty,invoiceNo:no,invoiceDate:$('#iv-date').value||todayS(),invoiceLink:link,log:logEntry(p,docLabel(ty)+(p.invoiced?' actualizada':' registrada')+(no?' · N.º '+no:''))};
+      if(up) Object.assign(data,{invoiceFileId:up.fileId,invoiceFileName:up.fileName,invoiceFileType:up.fileType});
+      await patchDoc('payments',p.id,data); toast(docLabel(ty)+' guardada'); }}]});
+}
+function receiveForm(p){
+  openModal({title:'Confirmar ingreso del dinero',
+    body:'<p style="margin:0;font-weight:600">'+esc(p.label)+' · '+(p.docType==='cuenta'?'cuenta de cobro ':'factura ')+(p.invoiceNo?'N.º '+esc(p.invoiceNo):'registrada')+'</p><div class="f2"><div class="fld"><label for="rc-date">Fecha en que ingresó</label><input class="inp" id="rc-date" type="date" value="'+todayS()+'"></div><div class="fld"><label for="rc-amt">Valor recibido (COP)</label><input class="inp num" id="rc-amt" inputmode="numeric" value="'+grp(p.amount)+'"></div></div><div class="fld"><label for="rc-note">Nota (opcional)</label><input class="inp" id="rc-note" placeholder="Ej. Transferencia Bancolombia"></div><p class="hint" style="margin:0">Al confirmar, este cobro deja de estar por cobrar y entra al Flujo de caja como ingreso, en el mes de la fecha de ingreso.</p>',
+    onMount:()=>{ $('#rc-amt').addEventListener('change',e=>{ e.target.value=grp(num(e.target.value)); }); },
+    actions:[{label:'Cancelar',fn:()=>true},{label:'Marcar como pagado',kind:'pri',fn:async()=>{
+      const amt=num($('#rc-amt').value)||p.amount, date=$('#rc-date').value||todayS();
+      await patchDoc('payments',p.id,{received:true,receivedDate:date,receivedAmount:amt,receivedNote:$('#rc-note').value.trim(),log:logEntry(p,'Ingreso confirmado · '+money(amt))}); toast('Cobro recibido: ya no está por cobrar y entró a caja como ingreso'); }}]});
+}
+
+/* ───────── formulario de cliente ───────── */
+let D=null, uid=0;
+function newDraft(){
+  const t=todayS(), ym=t.slice(0,7);
+  return {name:'',contact:'',scope:'',docType:'factura',services:[],startDate:t,endDate:'',alertDays:3,payMode:'abonos',total:0,
+    rows:[{label:'Anticipo al iniciar',pct:50,auto:true,amount:0,bill:t,due:t,st:'porfacturar'},{label:'Saldo contra entrega',pct:50,auto:true,amount:0,bill:'',due:'',st:'porfacturar'}],mst:{},
+    monthly:0,billDay:Number(t.slice(8,10)),firstMonth:ym,months:6,term:15,tasks:[],extra:[],quoteId:'',fromQuote:null};
+}
+
+const svcKeyOf=n=>{ n=(n||'').toLowerCase(); if(/web|p[aá]gina|sitio|tienda|landing/.test(n)) return 'web'; if(/\bredes?\b|social|instagram|facebook|tiktok|community/.test(n)) return 'redes'; if(/dashboard|tablero|\bia\b/.test(n)) return 'dash'; if(/pauta|campa[nñ]|\bads\b|publicidad/.test(n)) return 'pauta'; if(/\bseo\b|contenido|blog|posicion/.test(n)) return 'seo'; return 'otro'; };
+function applyQuote(q){
+  const items=q.items||[], men=items.filter(i=>i.mode==='mensual'), uni=items.filter(i=>i.mode!=='mensual');
+  const val=i=>(Number(i.price)||0)*(Number(i.qty)||1), t0=todayS();
+  D.quoteId=q.id||''; D.fromQuote=q.num;
+  D.name=q.cName||''; D.contact=[q.cContact,q.cEmail,q.cPhone].filter(Boolean).join(' · ');
+  D.scope='Cotización N.º '+q.num+' aprobada. Alcance acordado:\n\n'+items.map(i=>'• '+i.name+' ('+(i.mode==='mensual'?'pago mensual':'pago único')+' · '+money(val(i))+(i.mode==='mensual'?' al mes':'')+')'+(i.desc?'\n  '+i.desc:'')).join('\n\n')+(q.notes?'\n\nCondiciones: '+q.notes:'');
+  D.startDate=t0;
+  const keys=[]; items.forEach(i=>{ const k=svcKeyOf(i.name); if(!keys.includes(k)) keys.push(k); });
+  D.services=keys.slice(); keys.forEach(k=>addTemplateTasks(k));
+  items.filter(i=>svcKeyOf(i.name)==='otro').forEach(i=>D.tasks.push({id:'n'+(++uid),title:i.name,due:addDays(t0,10),owner:'Laura',svc:'otro',off:10,done:false}));
+  if(men.length){
+    D.payMode='mensual'; D.monthly=sum(men,val);
+    D.extra=uni.map(i=>({label:i.name,amount:val(i),bill:t0,st:'porfacturar'}));
+  } else {
+    D.payMode='abonos'; D.total=sum(uni,val); autoSplit();
+  }
+}
+function startFromQuote(q){
+  const c=q.clientId&&clientById(q.clientId);
+  if(c){ S.view='client'; S.cid=c.id; S.tab='seg'; render(); window.scrollTo(0,0); toast('Cotización aprobada. '+c.name+' ya es cliente: agregue el trabajo y los pagos desde su ficha.'); return; }
+  clientForm(null,q);
+}
+async function approveQuote(q){
+  await patchDoc('quotes',q.id,{status:'aprobada',approvedAt:new Date().toISOString()});
+  startFromQuote(Object.assign({},q,{status:'aprobada'}));
+}
+function clientForm(c,pre){
+  const editing=!!c;
+  D=editing?{name:c.name||'',contact:c.contact||'',scope:c.scope||'',docType:c.docType||'factura',services:(c.services||[]).slice(),startDate:c.startDate||'',endDate:c.endDate||'',alertDays:c.alertDays!=null?c.alertDays:3}:newDraft();
+  if(!editing&&pre) applyQuote(pre);
+  const body=()=>{
+    let h=(!editing&&pre?'<div class="hint" style="border:1px solid var(--accent);background:var(--accent-soft);border-radius:10px;padding:10px 12px;color:var(--fg)"><b>Datos traídos de la cotización N.º '+esc(pre.num)+'.</b> Revise lo que el cliente aprobó, ajuste el plan de trabajo y los pagos, y complete la ficha. No se guarda nada hasta que presione «Crear cliente».</div>':'')+'<div class="f2"><div class="fld"><label for="cf-name">Cliente</label><input class="inp" id="cf-name" data-k="name" placeholder="Nombre del cliente o empresa" value="'+esc(D.name)+'"></div><div class="fld"><label for="cf-contact">Contacto</label><input class="inp" id="cf-contact" data-k="contact" placeholder="Persona, correo o teléfono" value="'+esc(D.contact)+'"></div></div>'
+     +'<div class="fld" style="max-width:340px"><label for="cf-doc">Documento de cobro habitual</label><select class="inp" id="cf-doc" data-k="docType">'+docOpts(D.docType)+'</select><span class="hint">Se usa por defecto al registrar cada cobro. Puede cambiarlo en cada pago.</span></div>'
+     +'<div class="fld"><label for="cf-logo">Logo del cliente (opcional)</label>'+(S.assets?'<div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">'+(editing?logoHTML(c):'')+'<input class="inp" id="cf-logo" type="file" accept="image/*" style="flex:1;min-width:200px"></div>'+(editing&&c.logoId?'<label style="display:flex;gap:8px;align-items:center;font-size:12px;text-transform:none;letter-spacing:0;font-weight:600;color:var(--muted)"><input type="checkbox" id="cf-rmlogo"> Quitar el logo actual</label>':'<span class="hint">PNG, JPG o SVG. Se muestra en el panel y en la ficha del cliente.</span>'):'<span class="hint">La carga de archivos no está disponible para su usuario.</span>')+'</div>'
+     +'<div class="f3"><div class="fld"><label for="cf-start">Inicio del trabajo</label><input class="inp" id="cf-start" type="date" data-k="startDate" value="'+esc(D.startDate)+'"></div><div class="fld"><label for="cf-end">Entrega final</label><input class="inp" id="cf-end" type="date" data-k="endDate" value="'+esc(D.endDate)+'"></div><div class="fld"><label for="cf-alert">Avisar facturación (días antes)</label><input class="inp num" id="cf-alert" type="number" min="0" max="30" data-k="alertDays" value="'+esc(D.alertDays)+'"></div></div>'
+     +'<div class="fld"><span class="lab">Trabajo a realizar</span><div class="svc" id="cf-svc"></div></div>'
+     +'<div class="fld"><label for="cf-scope">Contexto y entregas en general</label><textarea class="inp" id="cf-scope" rows="'+(D.fromQuote?10:3)+'" data-k="scope" placeholder="Qué se le va a hacer al cliente, entregables esperados, condiciones…">'+esc(D.scope)+'</textarea></div>';
+    if(!editing){
+      h+='<hr class="hr"><div class="fld"><span class="lab">Plan de tareas</span><span class="hint">Se genera según el trabajo elegido. Edite, quite o agregue lo que necesite.</span><div id="cf-tasks" style="display:flex;flex-direction:column;gap:8px;margin-top:6px"></div><div><button class="btn sm" type="button" data-m="add-task-row">+ Agregar tarea</button></div></div>'
+       +'<hr class="hr"><div class="fld"><span class="lab">Forma de pago acordada</span><div class="seg" id="cf-mode"></div></div><div id="cf-pay" style="display:flex;flex-direction:column;gap:12px"></div>';
+    }
+    return h;
+  };
+  openModal({title:editing?'Editar cliente':(pre?'Nuevo cliente desde la cotización N.º '+pre.num:'Nuevo cliente'),wide:true,body:body(),
+    onMount:root=>{ paintSvc(); if(!editing){ paintTasks(); paintMode(); paintPay(); } bindForm(root,editing); },
+    actions:[{label:'Cancelar',fn:()=>true},{label:editing?'Guardar cambios':'Crear cliente',kind:'pri',fn:()=>editing?saveEdit(c):createClient()}]});
+}
+function paintSvc(){
+  $('#cf-svc').innerHTML=Object.keys(SERVICES).map(k=>'<button type="button" data-m="svc" data-k="'+k+'" aria-pressed="'+D.services.includes(k)+'">'+esc(SERVICES[k].label)+'</button>').join('');
+}
+function paintTasks(){
+  const box=$('#cf-tasks'); if(!box) return;
+  box.innerHTML=D.tasks.length?D.tasks.map((t,i)=>'<div class="trow"><input class="inp t-title" id="tr-title-'+t.id+'" data-g="task" data-i="'+i+'" data-f="title" value="'+esc(t.title)+'" aria-label="Tarea"><input class="inp" id="tr-due-'+t.id+'" type="date" data-g="task" data-i="'+i+'" data-f="due" value="'+esc(t.due)+'" aria-label="Fecha de entrega"><select class="inp" id="tr-own-'+t.id+'" data-g="task" data-i="'+i+'" data-f="owner" aria-label="Responsable"><option'+(t.owner==='Laura'?' selected':'')+'>Laura</option><option'+(t.owner==='Diego'?' selected':'')+'>Diego</option></select><label class="hecha"><input type="checkbox" id="tr-done-'+t.id+'" data-g="task" data-i="'+i+'" data-f="done"'+(t.done?' checked':'')+'> Hecha</label><button class="x" type="button" data-m="del-task-row" data-i="'+i+'" aria-label="Quitar tarea">×</button></div>').join('')+'<div><button class="link" type="button" data-m="tasks-past">Marcar como cumplidas las tareas con fecha anterior a hoy</button></div>':'<div class="hint">Elija el trabajo a realizar o agregue tareas manualmente.</div>';
+}
+function paintMode(){
+  $('#cf-mode').innerHTML='<button type="button" data-m="mode" data-k="abonos" aria-pressed="'+(D.payMode==='abonos')+'"><b>Abonos</b><span>Un pago al iniciar y el saldo al entregar</span></button><button type="button" data-m="mode" data-k="mensual" aria-pressed="'+(D.payMode==='mensual')+'"><b>Pago mensual</b><span>Una factura cada mes en la fecha acordada</span></button>';
+}
+const docLabel = t => t==='cuenta'?'Cuenta de cobro':'Factura';
+const docOpts = v => '<option value="factura"'+(v!=='cuenta'?' selected':'')+'>Factura</option><option value="cuenta"'+(v==='cuenta'?' selected':'')+'>Cuenta de cobro</option>';
+const stOpts = v => [['porfacturar','Por facturar'],['facturado','Ya facturado'],['pagado','Ya pagado']].map(o=>'<option value="'+o[0]+'"'+(v===o[0]?' selected':'')+'>'+o[1]+'</option>').join('');
+function paintPay(){
+  const box=$('#cf-pay'); if(!box) return;
+  if(D.payMode==='abonos'){
+    box.innerHTML='<div class="fld" style="max-width:280px"><label for="pf-total">Valor total del trabajo (COP)</label><input class="inp num" id="pf-total" inputmode="numeric" data-g="pay" data-f="total" value="'+grp(D.total)+'"></div>'
+     +'<div style="display:flex;flex-direction:column;gap:8px">'+D.rows.map((r,i)=>'<div class="prow"><input class="inp p-label" id="pr-label-'+i+'" data-g="row" data-i="'+i+'" data-f="label" value="'+esc(r.label)+'" aria-label="Concepto"><input class="inp num" id="pr-amt-'+i+'" inputmode="numeric" data-g="row" data-i="'+i+'" data-f="amount" value="'+grp(r.amount)+'" aria-label="Valor"><input class="inp" id="pr-bill-'+i+'" type="date" data-g="row" data-i="'+i+'" data-f="bill" value="'+esc(r.bill)+'" aria-label="Fecha de facturación"><input class="inp" id="pr-due-'+i+'" type="date" data-g="row" data-i="'+i+'" data-f="due" value="'+esc(r.due)+'" aria-label="Pago esperado"><select class="inp" id="pr-st-'+i+'" data-g="row" data-i="'+i+'" data-f="st" aria-label="Estado">'+stOpts(r.st)+'</select><button class="x" type="button" data-m="del-pay-row" data-i="'+i+'" aria-label="Quitar pago">×</button></div>').join('')+'</div>'
+     +'<div class="hint">Por fila: concepto, valor, <b>fecha de facturación</b>, <b>pago esperado</b> y estado. Si el cliente ya viene trabajando, marque cada abono como ya facturado o ya pagado. Si deja vacío el pago esperado se usa la fecha de facturación.</div>'
+     +'<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><button class="btn sm" type="button" data-m="add-pay-row">+ Agregar abono</button><span class="hint" id="pf-sum"></span></div>';
+    updateSum();
+  } else {
+    box.innerHTML='<div class="f3"><div class="fld"><label for="pf-monthly">Valor mensual (COP)</label><input class="inp num" id="pf-monthly" inputmode="numeric" data-g="pay" data-f="monthly" value="'+grp(D.monthly)+'"></div><div class="fld"><label for="pf-day">Día del mes para facturar</label><input class="inp num" id="pf-day" type="number" min="1" max="31" data-g="pay" data-f="billDay" value="'+esc(D.billDay)+'"></div><div class="fld"><label for="pf-term">Plazo de pago (días)</label><input class="inp num" id="pf-term" type="number" min="0" max="120" data-g="pay" data-f="term" value="'+esc(D.term)+'"></div></div>'
+     +'<div class="f2"><div class="fld"><label for="pf-first">Primer mes a facturar</label><input class="inp" id="pf-first" type="month" data-g="pay" data-f="firstMonth" value="'+esc(D.firstMonth)+'"></div><div class="fld"><label for="pf-months">Meses a programar</label><input class="inp num" id="pf-months" type="number" min="1" max="36" data-g="pay" data-f="months" value="'+esc(D.months)+'"></div></div>'
+     +'<div id="pf-prev"></div>'+paintExtra();
+    updatePrev();
+  }
+}
+function paintExtra(){
+  if(!D.extra||!D.extra.length) return '';
+  return '<hr class="hr"><div class="fld"><span class="lab">Pagos únicos de la cotización</span><span class="hint">La cotización también incluye estos cobros de una sola vez. Se programan junto a las mensualidades; ajuste la fecha de facturación y el estado.</span></div>'
+   +'<div style="display:flex;flex-direction:column;gap:8px">'+D.extra.map((r,i)=>'<div class="prow"><input class="inp p-label" data-g="xr" data-i="'+i+'" data-f="label" value="'+esc(r.label)+'" aria-label="Concepto"><input class="inp num" inputmode="numeric" data-g="xr" data-i="'+i+'" data-f="amount" value="'+grp(r.amount)+'" aria-label="Valor"><input class="inp" type="date" data-g="xr" data-i="'+i+'" data-f="bill" value="'+esc(r.bill||'')+'" aria-label="Fecha de facturación"><select class="inp" data-g="xr" data-i="'+i+'" data-f="st" aria-label="Estado">'+stOpts(r.st)+'</select><span></span><button class="x" type="button" data-m="del-xr" data-i="'+i+'" aria-label="Quitar">×</button></div>').join('')+'</div>';
+}
+function genMonths(){
+  const out=[]; const fm=(D.firstMonth||'').split('-').map(Number); if(fm.length<2||!fm[0]) return out;
+  const day=Math.min(31,Math.max(1,Number(D.billDay)||1)), n=Math.min(36,Math.max(1,Number(D.months)||1));
+  for(let i=0;i<n;i++){ let y=fm[0], m=fm[1]+i; y+=Math.floor((m-1)/12); m=((m-1)%12)+1; const bill=y+'-'+pad(m)+'-'+pad(Math.min(day,new Date(y,m,0).getDate())); out.push({label:'Mensualidad '+monthName(y,m),amount:num(D.monthly),billDate:bill,dueDate:addDays(bill,Number(D.term)||0),kind:'mensual'}); }
+  return out;
+}
+function updatePrev(){
+  const el=$('#pf-prev'); if(!el) return; const g=genMonths();
+  if(!g.length){ el.innerHTML='<div class="hint">Indique el primer mes para ver el calendario de facturación.</div>'; return; }
+  D.mst=D.mst||{};
