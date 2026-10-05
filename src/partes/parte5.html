@@ -1,0 +1,340 @@
+    font('normal',7.5,[200,200,194]);
+    const info=[E.nombre,E.nit&&('NIT '+E.nit),E.dir,E.web,E.tel&&('Tel. '+E.tel),E.email].filter(Boolean).join('  ·  ');
+    doc.text(T(info),W/2,H-7.2,{align:'center',maxWidth:W-2*M});
+    font('normal',7,[150,150,144]); doc.text('Página '+i+' de '+n,W/2,H-3.4,{align:'center'});
+  }
+  return doc.output('blob');
+}
+
+/* ───────── prospección por correo ───────── */
+const PST={nuevo:['Por contactar',''],enviado:['Enviado','info'],respondio:['Respondió','ok'],interesado:['Interesado','ok'],nocontactar:['No contactar','bad'],rebotado:['Rebotado','bad'],error:['Error de envío','warn']};
+const PBLOCK=['nocontactar','rebotado','error','respondio','interesado'];
+const isEmail=e=>/^[^\s@,;<>]+@[^\s@,;<>]+\.[^\s@,;<>]{2,}$/.test(e);
+const psetD=()=>Object.assign({cap:100,dmin:10,dmax:25},S.pset||{});
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+function allRows(){ const out=[]; S.chunks.forEach(ch=>(ch.rows||[]).forEach((r,i)=>out.push(Object.assign({},r,{_ck:ch.id,_i:i,_l:ch.listId,_ln:ch.listName})))); return out; }
+function getLists(rows){
+  const m={}; S.chunks.forEach(ch=>{ const l=m[ch.listId]=m[ch.listId]||{id:ch.listId,name:ch.listName,cks:[],ca:ch.createdAt||'',n:0}; l.cks.push(ch.id); });
+  rows.forEach(r=>{ const l=m[r._l]; if(!l) return; l.n++; l[r.st]=(l[r.st]||0)+1; });
+  return Object.values(m).sort((a,b)=>(b.ca||'').localeCompare(a.ca||''));
+}
+const eligible=(camp,rows)=>rows.filter(r=>(!camp.listId||r._l===camp.listId)&&r._l!=='bajas'&&!PBLOCK.includes(r.st)&&!(r.cp||[]).includes(camp.id));
+const sentToday=rows=>rows.filter(r=>r.ld===todayS()).length;
+async function putRow(ck,i,patch){
+  const ch=S.chunks.find(c=>c.id===ck); if(!ch) throw {message:'No se encontró la base de datos.'};
+  const rows=ch.rows.slice(); rows[i]=Object.assign({},rows[i],patch); ch.rows=rows;
+  await col('contacts').doc(ck).update({rows});
+}
+async function writeRows(listId,listName,rows){
+  const now=new Date().toISOString(); let n=0;
+  for(let k=0;k<rows.length;k+=100){ await col('contacts').doc(listId+'-'+(n)).set({listId,listName,n,rows:rows.slice(k,k+100),createdAt:now}); n++; }
+}
+/* tokens */
+function fillTpl(t,r,ex){
+  const E=empData(), who=E[ex==='diego'?'diego':'laura'].name;
+  const v={nombre:r.n||('equipo'+(r.c?' de '+r.c:'')),empresa:r.c||'su empresa',ciudad:r.ci||'',sector:r.s||'',cargo:r.k||'',remitente:who};
+  return String(t||'').replace(/\{\{\s*(\w+)\s*\}\}/g,(m,k)=>v[k]!=null?v[k]:m);
+}
+const waDigits=n=>{ let d=String(n||'').replace(/\D/g,''); if(d.length===10&&d[0]==='3') d='57'+d; return d; };
+const waLink=()=>{ const E=empData(), d=waDigits(E.wa); return d?'https://wa.me/'+d+(E.waText?'?text='+encodeURIComponent(E.waText):''):''; };
+function mailParts(camp,r){
+  const E=empData(), link=waLink();
+  const subject=fillTpl(camp.subject,r,'laura');
+  const opt='Si no desea recibir más mensajes de '+E.nombre+', responda este correo con la palabra BAJA y lo retiraremos de inmediato.';
+  const label=esc(camp.btn||'Contáctenos');
+  const btn=link?'<table cellpadding="0" cellspacing="0" border="0" align="center" style="margin:22px auto;width:auto"><tr><td bgcolor="#7ED321" style="border-radius:8px;width:auto"><a href="'+esc(link)+'" style="display:inline-block;padding:15px 38px;color:#0E0B0A;font-weight:bold;font-size:17px;text-decoration:none;font-family:Arial,Helvetica,sans-serif">'+label+'</a></td></tr></table>':'';
+  const htm='<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#222;text-align:center">'+btn+'<div style="font-size:12px;color:#555">'+esc(E.nombre)+'</div><br><div style="font-size:11px;color:#888">'+esc(opt)+'</div></div>';
+  const body=(link?(camp.btn||'Contáctenos')+' por WhatsApp: '+link+'\n\n':'')+E.nombre+'\n\n--\n'+opt;
+  return {subject,body,htmlBody:htm};
+}
+/* lectura de archivos */
+function parseCSV(t){
+  if(t.charCodeAt(0)===0xFEFF) t=t.slice(1);
+  const first=t.split(/\r?\n/,1)[0]; const c1=first.split(',').length, c2=first.split(';').length, c3=first.split('\t').length;
+  const sep=c2>c1&&c2>=c3?';':(c3>c1?'\t':',');
+  const rows=[]; let r=[],f='',q=false;
+  for(let i=0;i<t.length;i++){ const ch=t[i];
+    if(q){ if(ch==='"'){ if(t[i+1]==='"'){ f+='"'; i++; } else q=false; } else f+=ch; }
+    else if(ch==='"') q=true; else if(ch===sep){ r.push(f); f=''; }
+    else if(ch==='\n'||ch==='\r'){ if(ch==='\r'&&t[i+1]==='\n') i++; r.push(f); f=''; if(r.some(x=>x.trim()!=='')) rows.push(r); r=[]; }
+    else f+=ch; }
+  r.push(f); if(r.some(x=>x.trim()!=='')) rows.push(r); return rows;
+}
+function loadXlsx(){
+  if(window.XLSX) return Promise.resolve(window.XLSX);
+  return new Promise((res,rej)=>{ const sc=document.createElement('script'); sc.src='https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js'; sc.onload=()=>window.XLSX?res(window.XLSX):rej(new Error('xlsx')); sc.onerror=()=>rej(new Error('xlsx')); document.head.appendChild(sc); });
+}
+async function readTable(file){
+  const buf=await file.arrayBuffer();
+  if(/\.(xlsx|xls|xlsm)$/i.test(file.name)){ const X=await loadXlsx(); const wb=X.read(buf,{type:'array'}); const ws=wb.Sheets[wb.SheetNames[0]]; return X.utils.sheet_to_json(ws,{header:1,raw:false,defval:''}).map(r=>r.map(x=>String(x==null?'':x))).filter(r=>r.some(x=>x.trim()!=='')); }
+  let txt; try{ txt=new TextDecoder('utf-8',{fatal:true}).decode(buf); }catch(e){ txt=new TextDecoder('windows-1252').decode(buf); }
+  return parseCSV(txt);
+}
+const PFIELDS=[['e','Correo electrónico',/mail|correo/i],['n','Nombre del contacto',/^(nombre|contacto|name|persona|responsable)/i],['c','Empresa',/empresa|compa[nñ]|raz[oó]n|negocio|company|cliente/i],['ci','Ciudad',/ciudad|municip|city/i],['s','Sector',/sector|industria|actividad|giro|rubro/i],['k','Cargo',/cargo|puesto|rol\b|position/i]];
+let PI=null;
+function importForm(){
+  PI={name:'',data:null,map:{}};
+  openModal({title:'Importar base de datos',wide:true,
+    body:'<p class="hint" style="margin:0">Suba un archivo Excel (.xlsx) o CSV con una fila por contacto. La primera fila debe tener los títulos de las columnas. Solo el correo es obligatorio; nombre, empresa, ciudad, sector y cargo permiten personalizar los mensajes.</p>'
+     +'<div class="f2"><div class="fld"><label for="pi-file">Archivo</label><input class="inp" id="pi-file" type="file" accept=".xlsx,.xls,.csv,text/csv"></div><div class="fld"><label for="pi-name">Nombre de la base</label><input class="inp" id="pi-name" placeholder="Ej. Transportadores Bogotá"></div></div>'
+     +'<div id="pi-map"></div><div id="pi-sum"></div>',
+    onMount:()=>{
+      $('#pi-name').addEventListener('input',e=>{ PI.name=e.target.value; });
+      $('#pi-file').addEventListener('change',async e=>{
+        const f=e.target.files[0]; if(!f) return;
+        try{ const t=await readTable(f); if(t.length<2){ toast('El archivo no tiene filas de datos.'); return; }
+          PI.data=t; if(!PI.name){ PI.name=f.name.replace(/\.[^.]+$/,''); $('#pi-name').value=PI.name; }
+          PI.map={}; const used=new Set(); PFIELDS.forEach(fd=>{ const i=t[0].findIndex((h,ix)=>!used.has(ix)&&fd[2].test(h)); if(i>=0){ PI.map[fd[0]]=i; used.add(i); } });
+          paintImport(); }
+        catch(err){ console.error(err); toast('No se pudo leer el archivo. Pruebe guardándolo como CSV o revise su conexión.'); }
+      });
+    },
+    actions:[{label:'Cancelar',fn:()=>true},{label:'Importar contactos',kind:'pri',id:'pi-go',fn:doImport}]});
+}
+function calcImport(){
+  const t=PI.data, ex=new Map(allRows().map(r=>[r.e,r.st])); const seen=new Set(), ok=[]; let bad=0,dupF=0,dupE=0,sup=0;
+  const cell=(row,k)=>PI.map[k]>=0&&PI.map[k]!=null?String(row[PI.map[k]]||'').trim().slice(0,120):'';
+  t.slice(1).forEach(row=>{
+    const m=cell(row,'e').toLowerCase().match(/[^\s;,<>]+@[^\s;,<>]+/); const e=m?m[0]:'';
+    if(!isEmail(e)){ bad++; return; } if(seen.has(e)){ dupF++; return; } seen.add(e);
+    if(ex.has(e)){ dupE++; if(ex.get(e)==='nocontactar') sup++; return; }
+    ok.push({e,n:cell(row,'n'),c:cell(row,'c'),ci:cell(row,'ci'),s:cell(row,'s'),k:cell(row,'k'),st:'nuevo',sc:0,cp:[]});
+  });
+  return {ok,bad,dupF,dupE,sup,total:t.length-1};
+}
+function paintImport(){
+  const t=PI.data; const opts=sel=>'<option value="">— No usar —</option>'+t[0].map((h,i)=>'<option value="'+i+'"'+(sel===i?' selected':'')+'>'+esc(h||('Columna '+(i+1)))+'</option>').join('');
+  $('#pi-map').innerHTML='<div class="fld"><span class="lab">Qué contiene cada columna</span><span class="hint">Revise que el tablero haya reconocido bien las columnas.</span></div><div class="f3">'+PFIELDS.map(fd=>'<div class="fld"><label for="pm-'+fd[0]+'">'+fd[1]+(fd[0]==='e'?' *':'')+'</label><select class="inp" id="pm-'+fd[0]+'" data-pm="'+fd[0]+'">'+opts(PI.map[fd[0]])+'</select></div>').join('')+'</div>';
+  $('#pi-map').onchange=e=>{ const k=e.target.dataset.pm; if(!k) return; PI.map[k]=e.target.value===''?null:Number(e.target.value); paintSum(); };
+  paintSum();
+}
+function paintSum(){
+  if(PI.map.e==null){ $('#pi-sum').innerHTML='<div class="hint sum-bad">Indique cuál columna tiene el correo electrónico.</div>'; PI.res=null; return; }
+  const r=PI.res=calcImport();
+  $('#pi-sum').innerHTML='<div class="hint '+(r.ok.length?'sum-ok':'sum-bad')+'" style="font-size:13px"><b>'+r.ok.length+'</b> '+plural(r.ok.length,'contacto nuevo','contactos nuevos')+' para importar de '+r.total+' filas. '
+   +(r.bad?r.bad+' sin correo válido. ':'')+(r.dupF?r.dupF+' repetidos en el archivo. ':'')+(r.dupE?r.dupE+' ya existían en el tablero'+(r.sup?' ('+r.sup+' en la lista de no contactar':'')+(r.sup?')':'')+'. ':'')+'</div>'
+   +'<div class="tbl-wrap"><table style="min-width:520px"><thead><tr><th>Correo</th><th>Nombre</th><th>Empresa</th><th>Ciudad</th><th>Sector</th></tr></thead><tbody>'+r.ok.slice(0,5).map(x=>'<tr><td>'+esc(x.e)+'</td><td>'+esc(x.n)+'</td><td>'+esc(x.c)+'</td><td>'+esc(x.ci)+'</td><td>'+esc(x.s)+'</td></tr>').join('')+'</tbody></table></div>';
+}
+async function doImport(){
+  if(!PI.data){ toast('Seleccione primero el archivo.'); return false; }
+  if(!PI.res||!PI.res.ok.length){ toast('No hay contactos nuevos para importar.'); return false; }
+  const name=(PI.name||'').trim(); if(!name){ toast('Escriba el nombre de la base.'); return false; }
+  if(PI.res.ok.length>20000){ toast('El archivo supera 20.000 contactos. Divídalo en varios.'); return false; }
+  const id='b'+Date.now().toString(36); await writeRows(id,name,PI.res.ok);
+  S.pview='list'; S.plist=id; S.ppage=0; S.pfilter='todos'; S.psearch=''; render(); toast('Base «'+name+'» importada con '+PI.res.ok.length+' contactos');
+}
+/* ajustes y bajas */
+function pSettingsForm(){
+  const P=psetD();
+  openModal({title:'Ajustes de envío',
+    body:'<p class="hint" style="margin:0">Gmail limita los envíos diarios (alrededor de 500 en cuentas personales y 2.000 en Google Workspace; confirme el límite vigente en la ayuda de Google). Si supera el límite, Gmail bloquea el envío por un tiempo. Para cuidar la reputación del correo, empiece con pocos envíos al día y suba poco a poco.</p>'
+     +'<div class="f3"><div class="fld"><label for="ps-cap">Máximo de correos por día</label><input class="inp num" id="ps-cap" type="number" min="1" max="400" value="'+P.cap+'"></div><div class="fld"><label for="ps-min">Pausa mínima (segundos)</label><input class="inp num" id="ps-min" type="number" min="5" max="300" value="'+P.dmin+'"></div><div class="fld"><label for="ps-max">Pausa máxima (segundos)</label><input class="inp num" id="ps-max" type="number" min="5" max="600" value="'+P.dmax+'"></div></div>'
+     +'<div class="hint">La pausa aleatoria entre correos evita que el envío parezca automatizado. Con 100 correos y pausas de 10 a 25 segundos, la tanda dura cerca de 30 minutos.</div>',
+    actions:[{label:'Cancelar',fn:()=>true},{label:'Guardar',kind:'pri',fn:async()=>{
+      const cap=Math.min(400,Math.max(1,num($('#ps-cap').value)||100)), a=Math.max(5,num($('#ps-min').value)||10), b=Math.max(a,num($('#ps-max').value)||25);
+      await S.db.collection('settings').doc('prospeccion').set({cap,dmin:a,dmax:b}); toast('Ajustes guardados'); }}]});
+}
+function bajasForm(){
+  openModal({title:'Registrar bajas (no contactar)',
+    body:'<p class="hint" style="margin:0">Pegue los correos de quienes pidieron no recibir más mensajes (uno por línea o separados por coma). Quedan marcados como «No contactar» y el tablero nunca les volverá a escribir, incluso si aparecen en una base nueva.</p><div class="fld"><label for="bj-t">Correos</label><textarea class="inp" id="bj-t" rows="6"></textarea></div>',
+    actions:[{label:'Cancelar',fn:()=>true},{label:'Registrar bajas',kind:'pri',fn:async()=>{
+      const emails=[...new Set((($('#bj-t').value||'').toLowerCase().match(/[^\s;,<>]+@[^\s;,<>]+/g))||[])].filter(isEmail);
+      if(!emails.length){ toast('No se encontraron correos válidos.'); return false; }
+      const rows=allRows(), idx=new Map(rows.map(r=>[r.e,r])), byCk={}, nuevos=[];
+      emails.forEach(e=>{ const r=idx.get(e); if(r){ (byCk[r._ck]=byCk[r._ck]||[]).push(r._i); } else nuevos.push({e,n:'',c:'',ci:'',s:'',k:'',st:'nocontactar',sc:0,cp:[]}); });
+      for(const ck of Object.keys(byCk)){ const ch=S.chunks.find(c=>c.id===ck); const rs=ch.rows.slice(); byCk[ck].forEach(i=>{ rs[i]=Object.assign({},rs[i],{st:'nocontactar'}); }); ch.rows=rs; await col('contacts').doc(ck).update({rows:rs}); }
+      if(nuevos.length){ const ex=S.chunks.find(c=>c.listId==='bajas'); if(ex){ const rs=ex.rows.concat(nuevos); ex.rows=rs; await col('contacts').doc(ex.id).update({rows:rs}); } else await col('contacts').doc('bajas-0').set({listId:'bajas',listName:'No contactar (bajas)',n:0,rows:nuevos,createdAt:new Date().toISOString()}); }
+      toast(emails.length+' '+plural(emails.length,'correo registrado','correos registrados')+' como no contactar'); }}]});
+}
+/* campañas */
+const GM_MSG={needs_reauth:'La conexión con Gmail venció. Vuelva a conectarla en claude.ai: Configuración → Conectores.',server_not_connected:'Gmail no está conectado a su cuenta de Claude. Agréguelo en claude.ai: Configuración → Conectores.',selection_required:'Tiene más de un conector de Gmail. Elija cuál usar cuando la página se lo pida.',not_in_manifest:'No se autorizó el uso de Gmail en este tablero. Permítalo desde el menú Permisos del artefacto.',not_granted:'Esta vista no tiene permiso para usar Gmail.',capability_disabled:'El envío por Gmail no está disponible en esta vista.',capability_removed:'El envío por Gmail no está disponible en esta vista.',blocked_by_policy:'La política de su organización bloquea el envío de correos desde aquí.',approval_required:'Su organización exige aprobación para enviar correos; aún no es posible desde este tablero.',consent_required:'No se autorizó el uso de Gmail. Permítalo para continuar.',cancelled:'El envío fue cancelado.'};
+const DEF_BODY='Hola {{nombre}},\n\nSoy {{remitente}}, de D&L Hnos. Lozano. Apoyamos a empresas como {{empresa}} con marketing digital: gestión de redes sociales, páginas web y tableros de seguimiento con inteligencia artificial.\n\nMe gustaría contarle en una llamada breve cómo podríamos ayudar a {{empresa}} a conseguir más clientes. ¿Le parece si coordinamos 15 minutos esta semana?\n\nQuedo atento a su respuesta.';
+let PC=null, PCfile=null;
+async function prepImage(file){
+  const url=URL.createObjectURL(file);
+  try{
+    const img=await new Promise((res,rej)=>{ const i=new Image(); i.onload=()=>res(i); i.onerror=()=>rej(new Error('img')); i.src=url; });
+    for(const [w,q] of [[1200,.88],[1200,.75],[1000,.7],[800,.65],[640,.6]]){
+      const sc=Math.min(1,w/img.naturalWidth), cw=Math.round(img.naturalWidth*sc), ch=Math.round(img.naturalHeight*sc);
+      const cv=document.createElement('canvas'); cv.width=cw; cv.height=ch; const cx=cv.getContext('2d'); cx.fillStyle='#fff'; cx.fillRect(0,0,cw,ch); cx.drawImage(img,0,0,cw,ch);
+      const b=await new Promise(r=>cv.toBlob(r,'image/jpeg',q)); if(b&&b.size<=700*1024) return b;
+    }
+    throw new Error('big');
+  } finally { URL.revokeObjectURL(url); }
+}
+function campForm(camp){
+  const editing=!!camp, lists=getLists(allRows()).filter(l=>l.id!=='bajas'), E=empData();
+  PC=Object.assign({name:'',listId:lists[0]?lists[0].id:'',subject:'',imageId:'',imageName:'',btn:'Contáctenos'},editing?JSON.parse(JSON.stringify(camp)):{}); PCfile=null;
+  const body='<div class="f2"><div class="fld"><label for="pc-name">Nombre interno de la campaña</label><input class="inp" id="pc-name" data-pc="name" value="'+esc(PC.name)+'" placeholder="Ej. Octubre · Transportadores"></div>'
+   +'<div class="fld"><label for="pc-list">Base de datos</label><select class="inp" id="pc-list" data-pc="listId">'+(lists.length?'':'<option value="">Aún no hay bases</option>')+lists.map(l=>'<option value="'+esc(l.id)+'"'+(PC.listId===l.id?' selected':'')+'>'+esc(l.name)+' · '+l.n+'</option>').join('')+'</select></div></div>'
+   +'<div class="fld"><label for="pc-subj">Asunto del correo</label><input class="inp" id="pc-subj" data-pc="subject" value="'+esc(PC.subject)+'" placeholder="Ej. Más clientes para {{empresa}} con marketing digital"><span class="hint">Puede usar {{empresa}} o {{nombre}} para personalizarlo con los datos de cada contacto.</span></div>'
+   +'<div class="fld"><label for="pc-img">Imagen de la propuesta</label>'+(S.assets?'<input class="inp" id="pc-img" type="file" accept="image/*"><span class="hint" id="pc-imgh">'+(PC.imageId?'Actual: '+esc(PC.imageName||'imagen')+' (se reemplaza si elige otra). ':'')+'Se ajusta sola a un tamaño liviano para el correo (JPG o PNG).</span>':'<span class="hint">La carga de imágenes no está disponible para su usuario.</span>')+'</div>'
+   +'<div class="fld"><span class="lab">Botón del correo</span><div class="hint">«'+esc(PC.btn||'Contáctenos')+'» lleva al WhatsApp corporativo: '+(E.wa?'<b>'+esc(E.wa)+'</b>':'<b class="sum-bad">falta registrarlo</b>')+'. Se cambia en «Datos de D&amp;L».</div></div>'
+   +'<div class="fld"><span class="lab">Vista previa</span><div id="pc-prev" style="padding:16px;font-size:13px;background:#fff;color:#222;border-radius:12px"></div></div>'
+   +'<div class="f2"><div class="fld"><label for="pc-test">Enviar una prueba a</label><input class="inp" id="pc-test" type="email" placeholder="su-correo@ejemplo.com"></div><div class="fld" style="justify-content:flex-end"><button class="btn" type="button" data-pt="1">Enviar prueba</button></div></div>';
+  const actions=[{label:'Cancelar',fn:()=>true}];
+  if(editing) actions.push({label:'Eliminar',kind:'danger',keep:true,fn:b=>{ if(!b.dataset.armed){ b.dataset.armed='1'; b.classList.add('armed'); b.textContent='¿Confirmar eliminación?'; return; } delDoc('campaigns',camp.id).then(()=>{ closeModal(); toast('Campaña eliminada. Los contactos conservan su historial.'); }).catch(fail); }});
+  actions.push({label:editing?'Guardar cambios':'Crear campaña',kind:'pri',fn:()=>saveCamp(camp)});
+  openModal({title:editing?'Editar campaña':'Nueva campaña de correo',wide:true,body,actions,onMount:root=>{
+    let pu=PC.imageId?'/_blob/'+PC.imageId:'';
+    const prev=()=>{ const rows=allRows().filter(r=>!PC.listId||r._l===PC.listId); const r=rows[0]||{n:'María',c:'Empresa de ejemplo'}; const m=mailParts(PC,r);
+      $('#pc-prev').innerHTML='<div style="margin-bottom:10px;padding-bottom:8px;border-bottom:1px solid #e5e5e0;color:#666;font-size:12px">Asunto: <b style="color:#111">'+esc(m.subject||'(sin asunto)')+'</b></div>'+m.htmlBody
+        +'<div style="margin-top:12px;border-top:1px solid #e5e5e0;padding-top:10px;color:#666;font-size:12px">Archivo adjunto: '+(pu?'<img src="'+esc(pu)+'" alt="" style="height:46px;vertical-align:middle;border-radius:4px;border:1px solid #ddd;margin-right:8px">':'<i>aún no ha elegido imagen</i>')+'</div>'; };
+    prev();
+    root.addEventListener('input',e=>{ const k=e.target.dataset.pc; if(k){ PC[k]=e.target.value; prev(); } });
+    root.addEventListener('change',async e=>{
+      const k=e.target.dataset.pc; if(k){ PC[k]=e.target.value; prev(); return; }
+      if(e.target.id==='pc-img'){ const f=e.target.files[0]; PCfile=null; if(!f) return;
+        if(!/^image\//.test(f.type)){ toast('Elija una imagen (JPG o PNG).'); e.target.value=''; return; }
+        try{ PCfile=await prepImage(f); PCfile.name0=f.name; pu=URL.createObjectURL(PCfile); $('#pc-imgh').textContent='Lista: '+f.name+' ('+Math.round(PCfile.size/1024)+' KB una vez ajustada).'; prev(); }
+        catch(err){ toast('No se pudo preparar la imagen. Pruebe con otra o más liviana.'); e.target.value=''; } } });
+    root.addEventListener('click',async e=>{
+      const pt=e.target.closest('[data-pt]'); if(!pt) return;
+      const to=($('#pc-test').value||'').trim().toLowerCase(); if(!isEmail(to)){ toast('Escriba un correo válido para la prueba.'); return; }
+      if(!S.mcp){ toast(GM_MSG.capability_disabled); return; }
+      if(!waLink()){ toast('Registre primero el WhatsApp corporativo en «Datos de D&L».'); return; }
+      if(!PCfile&&!PC.imageId){ toast('Elija primero la imagen de la propuesta.'); return; }
+      const rows=allRows().filter(r=>!PC.listId||r._l===PC.listId); const m=mailParts(PC,rows[0]||{n:'María',c:'Empresa de ejemplo'});
+      pt.disabled=true;
+      try{ const att=PCfile?await fileB64(PCfile,'propuesta.jpg'):await blobB64('/_blob/'+PC.imageId,PC.imageName||'propuesta.jpg');
+        await S.mcp.callTool('Gmail','send_message',{to:[to],subject:'[PRUEBA] '+m.subject,body:m.body,htmlBody:m.htmlBody,attachments:[att]},{cache:false}); toast('Prueba enviada a '+to+'. Revise su bandeja y pruebe el botón.'); }
+      catch(err){ toast(GM_MSG[err&&err.code]||('No se pudo enviar la prueba. '+((err&&err.message)||''))); }
+      pt.disabled=false;
+    });
+  }});
+}
+const fileB64=(blob,name)=>new Promise((res,rej)=>{ const fr=new FileReader(); fr.onload=()=>res({content:String(fr.result).split(',')[1],filename:name,mimeType:blob.type||'image/jpeg'}); fr.onerror=()=>rej(new Error('No se pudo leer la imagen.')); fr.readAsDataURL(blob); });
+async function blobB64(url,name){ const r=await fetch(url); if(!r.ok) throw new Error('No se pudo cargar la imagen de la campaña.'); return fileB64(await r.blob(),name); }
+async function saveCamp(camp){
+  if(!(PC.name||'').trim()){ toast('Póngale un nombre interno a la campaña.'); return false; }
+  if(!PC.listId){ toast('Importe primero una base de datos y elíjala.'); return false; }
+  if(!(PC.subject||'').trim()){ toast('Escriba el asunto del correo.'); return false; }
+  if(!PCfile&&!PC.imageId){ toast('Elija la imagen de la propuesta.'); return false; }
+  let imageId=PC.imageId, imageName=PC.imageName;
+  if(PCfile){ if(!S.assets){ toast('La carga de imágenes no está disponible para su usuario.'); return false; } const up=await S.assets.upload(PCfile,{type:'image/jpeg'}); imageId=up.id; imageName=((PCfile.name0||'propuesta').replace(/\.[^.]+$/,'')||'propuesta')+'.jpg'; }
+  await saveDoc('campaigns',camp&&camp.id,{name:PC.name.trim(),listId:PC.listId,subject:PC.subject.trim(),imageId,imageName,btn:'Contáctenos',createdAt:(camp&&camp.createdAt)||new Date().toISOString()});
+  toast('Campaña guardada');
+}
+let SND=null;
+function sendForm(camp){
+  const rows=allRows(), el=eligible(camp,rows), P=psetD(), left=Math.max(0,P.cap-sentToday(rows)), def=Math.min(el.length,left);
+  const lname=(getLists(rows).find(l=>l.id===camp.listId)||{}).name||'—';
+  openModal({title:'Enviar campaña: '+camp.name,wide:true,
+    body:'<div class="stats" style="grid-template-columns:repeat(3,minmax(0,1fr));margin:0">'+stat('Por contactar',String(el.length),'En «'+lname+'»','')+stat('Enviados hoy',sentToday(rows)+' de '+P.cap,'Cupo diario restante: '+left,left?'good':'hot')+stat('Pausa entre correos',P.dmin+'–'+P.dmax+' s','Se cambia en Ajustes de envío','')+'</div>'
+     +'<div class="f2"><div class="fld"><label for="snd-n">Cuántos correos enviar ahora</label><input class="inp num" id="snd-n" type="number" min="1" value="'+Math.max(def,0)+'"><span class="hint">Mantenga esta ventana y la pestaña abiertas mientras dura el envío. Si la cierra, el envío se detiene y puede continuar después.</span></div>'
+     +'<div class="fld"><span class="lab">Antes de enviar</span><label style="display:flex;gap:8px;align-items:flex-start;font-size:13px;text-transform:none;letter-spacing:0;font-weight:500;color:var(--fg)"><input type="checkbox" id="snd-ok" style="margin-top:3px"><span>Confirmo que son empresas con las que tenemos un motivo comercial legítimo para escribir, que respetamos las bajas y que el mensaje se envía desde mi cuenta de Gmail.</span></label></div></div>'
+     +'<div id="snd-prog" class="hint"></div><div class="bar" style="height:8px"><i id="snd-bar" style="width:0"></i></div><div id="snd-log" style="max-height:200px;overflow:auto;font-size:12px;color:var(--muted);display:flex;flex-direction:column;gap:3px"></div>',
+    actions:[{label:'Cerrar',fn:()=>{ if(SND) SND.stop=true; return true; }},{label:'Detener',id:'snd-stop',keep:true,fn:()=>{ if(SND){ SND.stop=true; const b=$('#snd-stop'); if(b) b.disabled=true; } }},{label:'Iniciar envío',kind:'pri',id:'snd-go',keep:true,fn:b=>startSend(camp,b)}],
+    onMount:()=>{ $('#snd-stop').disabled=true; if(!S.mcp){ $('#snd-prog').textContent=GM_MSG.capability_disabled; $('#snd-go').disabled=true; } }});
+}
+async function startSend(camp,btn){
+  if(SND) return;
+  if(!S.mcp){ toast(GM_MSG.capability_disabled); return; }
+  if(!$('#snd-ok').checked){ toast('Marque la confirmación antes de enviar.'); return; }
+  const P=psetD(), rows=allRows(), left=Math.max(0,P.cap-sentToday(rows));
+  const n=Math.max(1,num($('#snd-n').value));
+  if(!left){ toast('Ya alcanzó el máximo de '+P.cap+' correos de hoy. Continúe mañana o suba el límite en Ajustes de envío.'); return; }
+  if(!waLink()){ toast('Registre primero el WhatsApp corporativo en «Datos de D&L».'); return; }
+  if(!camp.imageId){ toast('La campaña no tiene imagen. Edítela y súbala.'); return; }
+  const queue=eligible(camp,rows).slice(0,Math.min(n,left)); if(!queue.length){ toast('No quedan contactos por contactar en esta campaña.'); return; }
+  const log=(t,c)=>{ const el=$('#snd-log'); if(!el) return false; const d=document.createElement('div'); d.textContent=t; if(c) d.style.color=c; el.prepend(d); return true; };
+  let att; try{ att=await blobB64('/_blob/'+camp.imageId,camp.imageName||'propuesta.jpg'); }catch(e){ toast('No se pudo cargar la imagen de la campaña. Intente de nuevo.'); return; }
+  SND={stop:false}; btn.disabled=true; $('#snd-stop').disabled=false; let ok=0,errs=0,reason='';
+  for(let q=0;q<queue.length;q++){
+    if(SND.stop||!$('#snd-log')){ reason=reason||'Envío detenido.'; break; }
+    const it=queue[q], ch=S.chunks.find(c=>c.id===it._ck), r=ch&&ch.rows[it._i];
+    if(!r||r.e!==it.e||PBLOCK.includes(r.st)||(r.cp||[]).includes(camp.id)) continue;
+    const prog=$('#snd-prog'); if(prog) prog.textContent='Enviando '+(q+1)+' de '+queue.length+' · '+r.e;
+    const m=mailParts(camp,r);
+    try{
+      await S.mcp.callTool('Gmail','send_message',{to:[r.e],subject:m.subject,body:m.body,htmlBody:m.htmlBody,attachments:[att]},{cache:false});
+      await putRow(it._ck,it._i,{st:r.st==='nuevo'?'enviado':r.st,ls:new Date().toISOString(),ld:todayS(),sc:(r.sc||0)+1,cp:(r.cp||[]).concat([camp.id])});
+      ok++; log('Enviado a '+r.e); const bar=$('#snd-bar'); if(bar) bar.style.width=Math.round((q+1)/queue.length*100)+'%';
+    }catch(err){
+      const code=err&&err.code, msg=(err&&err.message)||'';
+      if(GM_MSG[code]){ reason=GM_MSG[code]; break; }
+      if(code==='tool_error'){
+        errs++; try{ await putRow(it._ck,it._i,{st:'error',err:msg.slice(0,160)}); }catch(e2){}
+        log('Error con '+r.e+': '+msg.slice(0,120),'var(--bad)');
+        if(/limit|quota|exceed|rate|l[ií]mite/i.test(msg)||errs>=3){ reason='Gmail rechazó los envíos: '+msg.slice(0,160); break; }
+      } else {
+        try{ await putRow(it._ck,it._i,{st:'error',err:'Resultado incierto: verifique en Enviados de Gmail'}); }catch(e2){}
+        reason='No se pudo confirmar el último envío (problema de conexión). Revise la carpeta Enviados de Gmail antes de continuar; ese contacto quedó marcado con error.'; break;
+      }
+    }
+    if(q<queue.length-1&&!SND.stop){ const ms=(P.dmin+Math.random()*Math.max(0,P.dmax-P.dmin))*1000; for(let w=0;w<ms&&!SND.stop&&$('#snd-log');w+=250) await sleep(250); }
+  }
+  SND=null; const g=$('#snd-go'), s=$('#snd-stop'); if(g) g.disabled=false; if(s) s.disabled=true;
+  const prog=$('#snd-prog'); const fin=ok+' '+plural(ok,'correo enviado','correos enviados')+(errs?' · '+errs+' con error':'')+(reason?'. '+reason:'. Tanda completada.');
+  if(prog) prog.textContent=fin; log(fin,reason?'var(--warn)':'var(--accent-ink)'); toast(fin.slice(0,140)); render();
+}
+/* vistas */
+function drawPros(){
+  if(S.pview==='list') return drawProsList();
+  const rows=allRows(), lists=getLists(rows), P=psetD(), v=S.pview==='bases'?'bases':'camp';
+  const n=rows.filter(r=>r._l!=='bajas').length, nuevos=rows.filter(r=>r.st==='nuevo').length, hoy=sentToday(rows), int=rows.filter(r=>r.st==='interesado'||r.st==='respondio').length;
+  let h=head('<button class="btn pri" data-act="p-import" type="button">+ Importar base de datos</button>');
+  h+='<div style="margin-bottom:6px"><h1>Prospección</h1><div class="hint" style="margin-top:4px">Suba bases de empresas y envíe correos de presentación desde su Gmail, con límites diarios y registro de cada contacto.</div></div>'+navTabs();
+  h+='<section class="stats" aria-label="Prospección">'+stat('Contactos',String(n),lists.filter(l=>l.id!=='bajas').length+' '+plural(lists.filter(l=>l.id!=='bajas').length,'base','bases'),'')+stat('Por contactar',String(nuevos),'Aún sin correo','')+stat('Enviados hoy',hoy+' de '+P.cap,'Cupo diario de envío',hoy>=P.cap?'hot':'good')+stat('Respondieron o interesados',String(int),'Márquelos en la lista de contactos','good')+'</section>';
+  h+='<div class="svc" style="margin-bottom:16px"><button type="button" data-act="pview" data-v="camp" aria-pressed="'+(v==='camp')+'">Campañas · '+S.camps.length+'</button><button type="button" data-act="pview" data-v="bases" aria-pressed="'+(v==='bases')+'">Bases de datos · '+lists.length+'</button></div>';
+  if(v==='camp'){
+    h+='<div class="toolbar"><h2>Campañas de correo</h2><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn sm" data-act="company" type="button">WhatsApp y datos de D&amp;L</button><button class="btn sm" data-act="p-settings" type="button">Ajustes de envío</button><button class="btn sm pri" data-act="p-newcamp" type="button">+ Nueva campaña</button></div></div>';
+    if(!S.camps.length) return h+'<div class="welcome"><h3>Aún no hay campañas</h3><p>1. Importe una base de datos de empresas (Excel o CSV). 2. Cree una campaña con el asunto y la imagen de la propuesta; el correo lleva un botón «Contáctenos» que abre su WhatsApp corporativo. 3. Envíe una prueba a su correo y luego dispare la primera tanda.</p><button class="btn pri" data-act="p-import" type="button">Importar base de datos</button></div>';
+    h+='<div class="tbl-wrap"><table><thead><tr><th>Campaña</th><th>Base</th><th>Asunto</th><th>Enviados</th><th>Por enviar</th><th></th></tr></thead><tbody>';
+    S.camps.slice().sort((a,b)=>(b.createdAt||'').localeCompare(a.createdAt||'')).forEach(c=>{ const sent=rows.filter(r=>(r.cp||[]).includes(c.id)).length, el=eligible(c,rows).length, l=lists.find(x=>x.id===c.listId);
+      h+='<tr><td style="font-weight:700">'+esc(c.name)+'</td><td class="hint">'+esc(l?l.name:'Base eliminada')+'</td><td class="hint" style="max-width:240px">'+esc(c.subject)+'</td><td class="num">'+sent+'</td><td class="num">'+el+'</td><td style="white-space:nowrap"><button class="btn sm pri" data-act="p-send" data-id="'+esc(c.id)+'" type="button"'+(l?'':' disabled')+'>Enviar</button> <button class="btn sm" data-act="p-editcamp" data-id="'+esc(c.id)+'" type="button">Editar</button></td></tr>'; });
+    h+='</tbody></table></div><div class="hint" style="margin-top:10px">Cada contacto recibe una campaña una sola vez. Quienes respondieron, se marcaron como interesados o pidieron la baja no vuelven a recibir correos.</div>';
+  } else {
+    h+='<div class="toolbar"><h2>Bases de datos</h2><button class="btn sm" data-act="p-bajas" type="button">Registrar bajas</button></div>';
+    if(!lists.length) return h+'<div class="welcome"><h3>Aún no hay bases</h3><p>Importe un Excel o CSV con los correos de las empresas que desea prospectar.</p><button class="btn pri" data-act="p-import" type="button">Importar base de datos</button></div>';
+    h+='<div class="prodgrid">'+lists.map(l=>'<div class="pcard"><div class="pn">'+esc(l.name)+'</div><div class="chips"><span class="chip">'+l.n+' contactos</span>'+['nuevo','enviado','respondio','interesado','nocontactar','error'].filter(k=>l[k]).map(k=>'<span class="pill '+PST[k][1]+'">'+PST[k][0]+' · '+l[k]+'</span>').join('')+'</div><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn sm" data-act="p-list" data-id="'+esc(l.id)+'" type="button">Ver contactos</button><button class="btn sm danger" data-act="p-dellist" data-id="'+esc(l.id)+'" type="button">Eliminar base</button></div></div>').join('')+'</div>';
+  }
+  return h;
+}
+function drawProsList(){
+  const rows=allRows().filter(r=>r._l===S.plist), l=getLists(allRows()).find(x=>x.id===S.plist);
+  if(!l){ S.pview='bases'; return drawPros(); }
+  const f=S.pfilter||'todos', q=(S.psearch||'').toLowerCase().trim();
+  let list=rows.filter(r=>(f==='todos'||r.st===f)&&(!q||[r.e,r.n,r.c,r.ci,r.s].join(' ').toLowerCase().includes(q)));
+  const per=50, pages=Math.max(1,Math.ceil(list.length/per)); const pg=Math.min(S.ppage||0,pages-1); const view=list.slice(pg*per,pg*per+per);
+  let h=head('<button class="btn pri" data-act="p-import" type="button">+ Importar base de datos</button>');
+  h+='<button class="link back" data-act="pview" data-v="bases" type="button">← Bases de datos</button><div style="margin-bottom:6px"><h1>'+esc(l.name)+'</h1><div class="hint" style="margin-top:4px">'+l.n+' contactos. Marque quién respondió o se interesó para no volver a escribirles, y cotice directamente desde aquí.</div></div>'+navTabs();
+  h+='<div class="toolbar"><div class="svc"><button type="button" data-act="p-filter" data-f="todos" aria-pressed="'+(f==='todos')+'">Todos · '+rows.length+'</button>'+Object.keys(PST).filter(k=>rows.some(r=>r.st===k)).map(k=>'<button type="button" data-act="p-filter" data-f="'+k+'" aria-pressed="'+(f===k)+'">'+PST[k][0]+' · '+rows.filter(r=>r.st===k).length+'</button>').join('')+'</div><input class="inp" id="p-search" placeholder="Buscar empresa, nombre o correo y presionar Enter" value="'+esc(S.psearch||'')+'" style="max-width:340px"></div>';
+  if(!view.length) h+='<div class="empty">No hay contactos con ese filtro.</div>';
+  else {
+    h+='<div class="tbl-wrap"><table><thead><tr><th>Empresa</th><th>Contacto</th><th>Correo</th><th>Ciudad</th><th>Sector</th><th>Estado</th><th>Último envío</th><th></th></tr></thead><tbody>';
+    view.forEach(r=>{ h+='<tr><td style="font-weight:600">'+esc(r.c||'—')+'</td><td>'+esc(r.n||'—')+'</td><td class="num" style="font-size:12px">'+esc(r.e)+'</td><td>'+esc(r.ci||'—')+'</td><td>'+esc(r.s||'—')+'</td>'
+      +'<td><select class="inp" data-pst="1" data-ck="'+esc(r._ck)+'" data-i="'+r._i+'" aria-label="Estado de '+esc(r.e)+'" style="min-width:140px">'+Object.keys(PST).map(k=>'<option value="'+k+'"'+(r.st===k?' selected':'')+'>'+PST[k][0]+'</option>').join('')+'</select>'+(r.err&&r.st==='error'?'<div class="hint">'+esc(r.err)+'</div>':'')+'</td>'
+      +'<td class="hint">'+(r.ls?esc(fmtTS(r.ls)):'—')+'</td><td><button class="btn sm" data-act="p-quote" data-ck="'+esc(r._ck)+'" data-i="'+r._i+'" type="button">Cotizar</button></td></tr>'; });
+    h+='</tbody></table></div>';
+    if(pages>1) h+='<div class="toolbar" style="margin-top:10px"><button class="btn sm" data-act="p-page" data-d="-1" type="button"'+(pg?'':' disabled')+'>← Anterior</button><span class="hint">Página '+(pg+1)+' de '+pages+'</span><button class="btn sm" data-act="p-page" data-d="1" type="button"'+(pg<pages-1?'':' disabled')+'>Siguiente →</button></div>';
+  }
+  return h;
+}
+function pDelList(id){
+  const l=getLists(allRows()).find(x=>x.id===id); if(!l) return;
+  openModal({title:'Eliminar base de datos',body:'<p style="margin:0">Se eliminará la base <b>'+esc(l.name)+'</b> con sus '+l.n+' contactos. Esta acción no se puede deshacer. Si hay contactos marcados como «No contactar», regístrelos antes en la lista de bajas para no volver a escribirles.</p>',
+    actions:[{label:'Cancelar',fn:()=>true},{label:'Eliminar definitivamente',kind:'danger armed',fn:async()=>{ for(const ck of l.cks) await delDoc('contacts',ck); S.pview='bases'; render(); toast('Base eliminada'); }}]});
+}
+document.addEventListener('change',async e=>{
+  const t=e.target; if(!$('#app').contains(t)) return;
+  if(t.id==='p-search'){ S.psearch=t.value; S.ppage=0; render(); }
+  else if(t.dataset&&t.dataset.pst){ try{ await putRow(t.dataset.ck,Number(t.dataset.i),{st:t.value,err:''}); render(); }catch(err){ fail(err); } }
+});
+
+/* ───────── arranque ───────── */
+function boot(){
+  draw();
+  const cl=window.claude;
+  if(!cl||!cl.use){ S.err='Este tablero debe abrirse desde claude.ai para guardar los datos.'; draw(); return; }
+  Promise.all([cl.use('db'),cl.use('assets'),cl.use('downloads').catch(()=>null),cl.use('mcp').catch(()=>null)]).then(([db,assets,dl,mcp])=>{
+    if(!db){ S.err='No se pudo conectar con el almacenamiento. Inicie sesión en claude.ai y recargue la página.'; draw(); return; }
+    S.db=db; S.assets=assets||null; S.dl=dl||null; S.mcp=mcp||null;
+    const sub=(name,key,field)=>db.collection(name).onSnapshot(snap=>{ S[field]=snap.docs.map(d=>Object.assign({id:d.id},d.data())); S.loaded[key]=true; render(); },e=>{ S.err='Se perdió la conexión con los datos ('+(e&&e.code||'error')+').'; render(); });
+    sub('clients','c','clients'); sub('tasks','t','tasks'); sub('payments','p','pays'); sub('expenses','e','exps'); sub('quotes','q','quotes'); sub('products','r','prods'); sub('contacts','k','chunks'); sub('campaigns','g','camps');
+    db.collection('settings').onSnapshot(snap=>{ const d=snap.docs.find(x=>x.id==='caja'); S.caja=d?d.data():null; const em=snap.docs.find(x=>x.id==='empresa'); S.empresa=em?em.data():null; const ps=snap.docs.find(x=>x.id==='prospeccion'); S.pset=ps?ps.data():null; S.loaded.s=true; render(); },e=>{ S.loaded.s=true; render(); });
+  }).catch(()=>{ S.err='No se pudo iniciar el tablero.'; draw(); });
+}
+boot();
+})();
+</script>
