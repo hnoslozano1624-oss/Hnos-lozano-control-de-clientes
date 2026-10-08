@@ -18,6 +18,41 @@ function tabInfo(c,s,terms){
   return '<div class="panel" style="max-width:720px"><div class="kv" style="margin-bottom:8px"><span>Contacto</span><span>'+esc(c.contact||'—')+'</span></div><div class="kv" style="margin-bottom:8px"><span>Servicios</span><span>'+((c.services||[]).map(k=>esc((SERVICES[k]||{}).label||k)).join(', ')||'—')+'</span></div><div class="kv" style="margin-bottom:8px"><span>Inicio / entrega</span><span>'+fmtD(c.startDate)+' / '+fmtD(c.endDate)+'</span></div><div class="kv" style="margin-bottom:8px"><span>Estado</span><span>'+(c.status==='cerrado'?'Inactivo':'Activo')+'</span></div><p class="hint" style="margin:12px 0 16px">'+esc(terms)+'</p><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" data-act="edit-client" type="button">Editar datos</button><button class="btn" data-act="toggle-status" type="button">'+(c.status==='cerrado'?'Reactivar cliente':'Marcar como inactivo')+'</button><button class="btn danger" data-act="delete-client" type="button">Eliminar cliente</button></div></div>';
 }
 
+/* ───────── biblioteca de contraseñas del cliente ───────── */
+const PWSHOW=new Set();
+function tabPw(c){
+  const L=(c.creds||[]).slice().sort((a,b)=>(a.platform||'').localeCompare(b.platform||'','es'));
+  let h='<div class="toolbar"><div><h2>Contraseñas de '+esc(c.name)+'</h2><div class="hint" style="margin-top:3px">Accesos que el cliente nos entregó para trabajar sus plataformas. Solo las ven las personas que ingresan a este tablero.</div></div><button class="btn sm pri" data-act="new-cred" type="button">+ Agregar acceso</button></div>';
+  if(!L.length) return h+'<div class="empty">Aún no hay accesos guardados para este cliente. Agregue la primera plataforma, con su usuario y contraseña.</div>';
+  h+='<div class="tbl-wrap"><table><thead><tr><th>Plataforma</th><th>Usuario</th><th>Contraseña</th><th></th></tr></thead><tbody>';
+  L.forEach(x=>{ const on=PWSHOW.has(x.id);
+    h+='<tr><td style="font-weight:600;min-width:160px">'+esc(x.platform||'—')+(x.notes?'<div class="r-sub">'+esc(x.notes)+'</div>':'')+'</td>'
+     +'<td style="min-width:180px"><span class="mono">'+esc(x.user||'—')+'</span> '+(x.user?'<button class="link" data-act="copy-cred" data-id="'+esc(x.id)+'" data-f="user" type="button">Copiar</button>':'')+'</td>'
+     +'<td style="min-width:200px"><span class="mono">'+(x.pass?(on?esc(x.pass):'••••••••••'):'—')+'</span> '+(x.pass?'<button class="link" data-act="show-cred" data-id="'+esc(x.id)+'" type="button">'+(on?'Ocultar':'Mostrar')+'</button> <button class="link" data-act="copy-cred" data-id="'+esc(x.id)+'" data-f="pass" type="button">Copiar</button>':'')+'</td>'
+     +'<td style="text-align:right;white-space:nowrap"><button class="btn sm" data-act="edit-cred" data-id="'+esc(x.id)+'" type="button">Editar</button></td></tr>'; });
+  return h+'</tbody></table></div>';
+}
+async function copyCred(c,id,f){
+  const x=(c.creds||[]).find(z=>z.id===id); if(!x||!x[f]) return;
+  try{ await navigator.clipboard.writeText(x[f]); }
+  catch(e){ const t=document.createElement('textarea'); t.value=x[f]; t.style.position='fixed'; t.style.opacity='0'; document.body.appendChild(t); t.select(); try{ document.execCommand('copy'); }catch(e2){} t.remove(); }
+  toast((f==='pass'?'Contraseña':'Usuario')+' copiado');
+}
+function credForm(c,x){
+  const editing=!!x, o=x||{platform:'',user:'',pass:'',notes:''};
+  const list=(c.creds||[]).slice();
+  openModal({title:editing?'Editar acceso':'Agregar acceso',
+    body:'<div class="fld"><label for="cr-plat">Plataforma</label><input class="inp" id="cr-plat" list="cr-plats" placeholder="Ej. Instagram, Meta Business, Hosting, Dominio…" value="'+esc(o.platform)+'"><datalist id="cr-plats">'+['Instagram','Facebook','Meta Business Suite','TikTok','Google Ads','Google Analytics','Hosting','Dominio','WordPress','Shopify','Correo corporativo'].map(n=>'<option value="'+esc(n)+'">').join('')+'</datalist></div>'
+     +'<div class="f2"><div class="fld"><label for="cr-user">Usuario o correo</label><input class="inp" id="cr-user" autocomplete="off" value="'+esc(o.user)+'"></div><div class="fld"><label for="cr-pass">Contraseña</label><input class="inp mono" id="cr-pass" type="text" autocomplete="off" value="'+esc(o.pass)+'"></div></div>'
+     +'<div class="fld"><label for="cr-notes">Notas (opcional)</label><input class="inp" id="cr-notes" placeholder="Ej. Enlace de acceso, verificación en dos pasos, a nombre de quién está" value="'+esc(o.notes||'')+'"></div>',
+    actions:[...(editing?[{label:'Eliminar',kind:'danger',keep:true,fn:b=>{ if(!b.dataset.armed){ b.dataset.armed='1'; b.classList.add('armed'); b.textContent='¿Confirmar eliminación?'; return; } patchDoc('clients',c.id,{creds:list.filter(z=>z.id!==x.id)}).then(()=>{ closeModal(); toast('Acceso eliminado'); }).catch(fail); }}]:[]),{label:'Cancelar',fn:()=>true},
+      {label:'Guardar',kind:'pri',fn:async()=>{
+        const platform=($('#cr-plat').value||'').trim(); if(!platform){ toast('Escriba el nombre de la plataforma.'); return false; }
+        const rec={id:editing?x.id:('k'+Date.now().toString(36)+Math.random().toString(36).slice(2,6)),platform,user:($('#cr-user').value||'').trim(),pass:$('#cr-pass').value||'',notes:($('#cr-notes').value||'').trim()};
+        const next=editing?list.map(z=>z.id===x.id?rec:z):list.concat([rec]);
+        await patchDoc('clients',c.id,{creds:next}); toast('Acceso guardado'); }}]});
+}
+
 /* ───────── acciones ───────── */
 document.addEventListener('click',e=>{
   const el=e.target.closest('[data-act]'); if(!el||!$('#app').contains(el)) return;
@@ -78,6 +113,10 @@ function act(a,d){
     case 'next-month': monthForm(c,d.job||''); break;
     case 'new-job': jobForm(c); break;
     case 'edit-job': editJobForm(c,d.job||''); break;
+    case 'new-cred': credForm(c,null); break;
+    case 'edit-cred': credForm(c,(c.creds||[]).find(x=>x.id===d.id)); break;
+    case 'show-cred': { const k=d.id; if(PWSHOW.has(k)) PWSHOW.delete(k); else PWSHOW.add(k); render(); break; }
+    case 'copy-cred': copyCred(c,d.id,d.f); break;
     case 'invoice': invoiceForm(S.pays.find(p=>p.id===d.id)); break;
     case 'receive': receiveForm(S.pays.find(p=>p.id===d.id)); break;
     case 'unreceive': { const p=S.pays.find(x=>x.id===d.id); patchDoc('payments',p.id,{received:false,receivedDate:null,receivedAmount:null,receivedNote:null,log:logEntry(p,'Pago revertido a pendiente')}).then(()=>toast('Pago revertido')).catch(fail); break; }
