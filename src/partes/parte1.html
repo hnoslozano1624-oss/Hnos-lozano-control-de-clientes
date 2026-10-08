@@ -26,7 +26,8 @@
 .logo.sm{width:30px;height:30px;border-radius:8px;font-size:11px;padding:3px}
 .logo.lg{width:64px;height:64px;border-radius:14px;font-size:20px;padding:6px}
 body{background-color:var(--bg);background-image:radial-gradient(900px 420px at 100% -5%,rgba(126,211,33,.10),transparent 60%),radial-gradient(700px 400px at -10% 30%,rgba(126,211,33,.05),transparent 60%);background-repeat:no-repeat;color:var(--fg);font-family:var(--f-body);font-size:14px;line-height:1.5;padding-inline:16px;padding-block:0 64px;-webkit-font-smoothing:antialiased}
-.wrap{max-width:1120px;margin-inline:auto}
+.wrap{width:100%;max-width:none;margin-inline:0}
+.pay-sum.p3{grid-template-columns:repeat(3,minmax(0,1fr))}
 button,input,select,textarea{font:inherit;color:inherit}
 a{color:var(--accent-ink)}
 :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
@@ -219,10 +220,12 @@ textarea.inp{resize:vertical;min-height:80px}
 .qtot b{font-family:var(--f-data);font-size:15px}
 @media (max-width:820px){
   .stats,.pay-sum{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .pay-sum.p3{grid-template-columns:repeat(2,minmax(0,1fr))}
   .cols{grid-template-columns:minmax(0,1fr)}
   .brand-sub{display:none}
 }
 @media (max-width:560px){
+  .stats,.pay-sum,.pay-sum.p3{grid-template-columns:repeat(2,minmax(0,1fr))}
   .hero{padding:14px 16px}.hero-logo{height:56px}.hero::after{right:-40px}
   h1{font-size:25px}
   .f2,.f3,.seg{grid-template-columns:minmax(0,1fr)}
@@ -318,6 +321,16 @@ function stats(c){
     pct:ts.length?Math.round(done/ts.length*100):0,alerts:ps.map(p=>payAlert(p,c)).filter(Boolean)};
 }
 
+/* ───────── trabajos de un cliente (varios precios y formas de pago) ───────── */
+const jobOf=p=>p.job||'';
+const jobTitle=j=>j||'Trabajo principal';
+const jobLabel=(j,l)=>j?j+' · '+l:l;
+const relabel=(label,oldJ,newJ)=>{ let l=String(label||''); if(oldJ&&l.startsWith(oldJ+' · ')) l=l.slice(oldJ.length+3); return newJ?newJ+' · '+l:l; };
+const stripJob=p=>{ const j=jobOf(p); return j&&String(p.label||'').startsWith(j+' · ')?p.label.slice(j.length+3):p.label; };
+function jobsOf(c){ const m=new Map(); paysOf(c.id).forEach(p=>{ const j=jobOf(p); if(!m.has(j)) m.set(j,[]); m.get(j).push(p); }); return [...m.entries()].map(([name,ps])=>({name,ps})); }
+function jobStats(ps){ const total=sum(ps,p=>p.amount), paid=sum(ps.filter(p=>p.received),p=>p.receivedAmount!=null?p.receivedAmount:p.amount); return {total,paid,saldo:Math.max(0,total-paid),pend:ps.filter(p=>!p.received).length,done:ps.filter(p=>p.received).length}; }
+const jobMode=ps=>ps.some(p=>p.kind==='mensual')?'Pago mensual':(ps.length>1?'Abonos':'Pago único');
+
 /* ───────── toast / modal ───────── */
 function toast(msg){
   const r=$('#toast-root'); r.innerHTML='<div class="toast" role="status">'+esc(msg)+'</div>';
@@ -339,3 +352,31 @@ function openModal({title,body,actions,wide,onMount}){
   scrim.addEventListener('mousedown',e=>{ if(e.target===scrim) closeModal(); });
   root.onclick=async e=>{
     const t=e.target.closest('button'); if(!t) return;
+    if(t.hasAttribute('data-close')) return closeModal();
+    if(t.dataset.i!=null && foot.contains(t)){
+      const a=actions[Number(t.dataset.i)];
+      if(a.keep){ a.fn&&a.fn(t); return; }
+      t.disabled=true;
+      try{ const ok=await a.fn(t); if(ok!==false) closeModal(); else t.disabled=false; }
+      catch(err){ t.disabled=false; fail(err); }
+    }
+  };
+  const esc_=e=>{ if(e.key==='Escape') closeModal(); };
+  document.addEventListener('keydown',esc_); modalCleanup=()=>document.removeEventListener('keydown',esc_);
+  if(onMount) onMount(root);
+  const f=$('input,textarea,select',$('#m-body')); if(f && !wide) f.focus();
+}
+function fail(err){
+  const c=err&&err.code, m={quota_exceeded:'Se alcanzó el límite de almacenamiento.',too_large:'El archivo supera el tamaño permitido (20 MB).',unsupported_type:'Tipo de archivo no admitido. Use PDF o imagen (PNG, JPG).',invalid_argument:'No tiene permiso para guardar cambios en este tablero.',not_granted:'No tiene permiso para esta acción.',rate_limited:'Demasiadas acciones seguidas. Intente de nuevo en unos segundos.'};
+  toast(m[c]||('No se pudo guardar. '+((err&&err.message)||'Intente de nuevo.')));
+}
+
+/* ───────── archivos de soporte ───────── */
+async function uploadFile(file){
+  if(!file) return null;
+  if(!S.assets) throw {message:'La carga de archivos no está disponible para su usuario. Use un enlace.'};
+  const r=await S.assets.upload(file);
+  return {fileId:r.id,fileName:file.name,fileType:r.contentType};
+}
+function supportHTML(o){
+  let h='';
