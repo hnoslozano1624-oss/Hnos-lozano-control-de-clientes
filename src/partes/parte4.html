@@ -1,10 +1,3 @@
-  el.innerHTML='<div class="hint" style="margin-bottom:8px">Se programarán <b>'+g.length+'</b> '+plural(g.length,'factura','facturas')+' de '+money(num(D.monthly))+' (total '+money(sum(g,x=>x.amount))+'). Si el cliente ya viene trabajando, marque lo que ya se facturó o se cobró.</div>'
-   +'<div class="tbl-wrap"><table style="min-width:520px"><thead><tr><th>Mes</th><th>Facturar</th><th>Valor</th><th>Estado</th></tr></thead><tbody>'+g.map(x=>'<tr><td style="font-weight:600">'+esc(x.label.replace('Mensualidad ',''))+'</td><td class="num">'+fmtD(x.billDate)+'</td><td class="num">'+money(x.amount)+'</td><td><select class="inp" id="ms-'+x.billDate+'" data-g="mst" data-b="'+x.billDate+'" aria-label="Estado de '+esc(x.label)+'">'+stOpts(D.mst[x.billDate]||'porfacturar')+'</select></td></tr>').join('')+'</tbody></table></div>'
-   +'<div style="margin-top:8px"><button class="btn sm" type="button" data-m="mst-past">Marcar como pagados los meses anteriores a hoy</button></div>';
-}
-function updateSum(){
-  const el=$('#pf-sum'); if(!el) return; const s=sum(D.rows,r=>num(r.amount));
-  el.className='hint '+(D.total&&s!==num(D.total)?'sum-bad':'sum-ok');
   el.textContent='Suma de abonos '+money(s)+(D.total?(s===num(D.total)?' · coincide con el total':' · difiere del total en '+money(Math.abs(num(D.total)-s))):'');
 }
 function autoSplit(){ D.rows.forEach(r=>{ if(r.auto) r.amount=Math.round(num(D.total)*(r.pct/100)); }); }
@@ -85,8 +78,9 @@ async function createClient(){
     ex.forEach(r=>pays.push({label:(r.label||'').trim()||'Pago único',amount:num(r.amount),billDate:r.bill,dueDate:r.bill,kind:'abono',st:r.st||'porfacturar'}));
   }
   const lg=await pickLogo(); if(lg===false) return false;
+  const jobN=(D.job||'').trim(); if(jobN) pays.forEach(p=>{ p.job=jobN; p.label=jobLabel(jobN,p.label); });
   const now=new Date().toISOString();
-  const cid=await saveDoc('clients',null,{logoId:lg?lg.fileId:null,docType:D.docType||'factura',name:D.name.trim(),contact:D.contact.trim(),scope:D.scope.trim(),services:D.services,startDate:D.startDate||'',endDate:D.endDate||'',alertDays:Number(D.alertDays)||0,status:'activo',payMode:D.payMode,
+  const cid=await saveDoc('clients',null,{job:jobN,logoId:lg?lg.fileId:null,docType:D.docType||'factura',name:D.name.trim(),contact:D.contact.trim(),scope:D.scope.trim(),services:D.services,startDate:D.startDate||'',endDate:D.endDate||'',alertDays:Number(D.alertDays)||0,status:'activo',payMode:D.payMode,
     total:D.payMode==='abonos'?sum(pays,p=>p.amount):null,monthly:D.payMode==='mensual'?num(D.monthly):null,billDay:D.payMode==='mensual'?(Number(D.billDay)||1):null,term:D.payMode==='mensual'?(Number(D.term)||0):null,createdAt:now});
   const t0=todayS(); for(const t of D.tasks.filter(t=>t.title.trim())) await saveDoc('tasks',null,{clientId:cid,title:t.title.trim(),due:t.due||'',owner:t.owner,done:!!t.done,doneAt:t.done?((t.due&&t.due<=t0)?t.due:t0):null,createdAt:now});
   let n=0; for(const p of pays){ n++; const st=p.st; delete p.st; await saveDoc('payments',null,Object.assign({clientId:cid,seq:n,createdAt:now},p,statusData(st,Object.assign({doc:D.docType},p),now))); }
@@ -95,6 +89,88 @@ async function createClient(){
 }
 
 
+
+/* ───────── nuevo trabajo / editar trabajo ───────── */
+let JB=null;
+function jobForm(c){
+  const t0=todayS();
+  JB={name:'',mode:'unico',total:0,bill:t0,due:'',st:'porfacturar',
+    rows:[{label:'Anticipo al iniciar',pct:50,auto:true,amount:0,bill:t0,due:t0,st:'porfacturar'},{label:'Saldo contra entrega',pct:50,auto:true,amount:0,bill:'',due:'',st:'porfacturar'}],
+    monthly:0,billDay:Number(t0.slice(8,10)),term:15,firstMonth:t0.slice(0,7),months:6,past:false};
+  const paintJ=()=>{
+    $('#jb-mode').innerHTML=[['unico','Pago único','Un solo cobro por este trabajo'],['abonos','Abonos','Varios pagos: anticipo, saldo u otros'],['mensual','Pago mensual','Una factura cada mes']].map(m=>'<button type="button" data-jm="mode" data-k="'+m[0]+'" aria-pressed="'+(JB.mode===m[0])+'"><b>'+m[1]+'</b><span>'+m[2]+'</span></button>').join('');
+    const box=$('#jb-pay');
+    if(JB.mode==='unico'){
+      box.innerHTML='<div class="f2"><div class="fld"><label for="jb-total">Valor del trabajo (COP)</label><input class="inp num" id="jb-total" inputmode="numeric" data-jb="total" value="'+grp(JB.total)+'"></div><div class="fld"><label for="jb-st">Estado actual</label><select class="inp" id="jb-st" data-jb="st">'+stOpts(JB.st)+'</select></div></div>'
+       +'<div class="f2"><div class="fld"><label for="jb-bill">Fecha de facturación</label><input class="inp" id="jb-bill" type="date" data-jb="bill" value="'+esc(JB.bill)+'"></div><div class="fld"><label for="jb-due">Pago esperado</label><input class="inp" id="jb-due" type="date" data-jb="due" value="'+esc(JB.due)+'"></div></div>';
+    } else if(JB.mode==='abonos'){
+      box.innerHTML='<div class="fld" style="max-width:280px"><label for="jb-total">Valor total del trabajo (COP)</label><input class="inp num" id="jb-total" inputmode="numeric" data-jb="total" value="'+grp(JB.total)+'"></div>'
+       +'<div style="display:flex;flex-direction:column;gap:8px">'+JB.rows.map((r,i)=>'<div class="prow"><input class="inp p-label" id="jr-label-'+i+'" data-jr="label" data-i="'+i+'" value="'+esc(r.label)+'" aria-label="Concepto"><input class="inp num" id="jr-amt-'+i+'" inputmode="numeric" data-jr="amount" data-i="'+i+'" value="'+grp(r.amount)+'" aria-label="Valor"><input class="inp" type="date" data-jr="bill" data-i="'+i+'" value="'+esc(r.bill)+'" aria-label="Fecha de facturación"><input class="inp" type="date" data-jr="due" data-i="'+i+'" value="'+esc(r.due)+'" aria-label="Pago esperado"><select class="inp" data-jr="st" data-i="'+i+'" aria-label="Estado">'+stOpts(r.st)+'</select><button class="x" type="button" data-jm="del-row" data-i="'+i+'" aria-label="Quitar pago">×</button></div>').join('')+'</div>'
+       +'<div class="hint">Por fila: concepto, valor, <b>fecha de facturación</b>, <b>pago esperado</b> y estado.</div><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><button class="btn sm" type="button" data-jm="add-row">+ Agregar abono</button><span class="hint" id="jb-sum"></span></div>';
+      sumJ();
+    } else {
+      box.innerHTML='<div class="f3"><div class="fld"><label for="jb-monthly">Valor mensual (COP)</label><input class="inp num" id="jb-monthly" inputmode="numeric" data-jb="monthly" value="'+grp(JB.monthly)+'"></div><div class="fld"><label for="jb-day">Día del mes para facturar</label><input class="inp num" id="jb-day" type="number" min="1" max="31" data-jb="billDay" value="'+esc(JB.billDay)+'"></div><div class="fld"><label for="jb-term">Plazo de pago (días)</label><input class="inp num" id="jb-term" type="number" min="0" max="120" data-jb="term" value="'+esc(JB.term)+'"></div></div>'
+       +'<div class="f2"><div class="fld"><label for="jb-first">Primer mes a facturar</label><input class="inp" id="jb-first" type="month" data-jb="firstMonth" value="'+esc(JB.firstMonth)+'"></div><div class="fld"><label for="jb-months">Meses a programar</label><input class="inp num" id="jb-months" type="number" min="1" max="36" data-jb="months" value="'+esc(JB.months)+'"></div></div>'
+       +'<label style="display:flex;gap:8px;align-items:center;font-size:13px;text-transform:none;letter-spacing:0;font-weight:500;color:var(--fg)"><input type="checkbox" id="jb-past" data-jb="past"'+(JB.past?' checked':'')+'> Marcar como pagados los meses anteriores a hoy</label><div class="hint" id="jb-prev"></div>';
+      prevJ();
+    }
+  };
+  const sumJ=()=>{ const el=$('#jb-sum'); if(!el) return; const s=sum(JB.rows,r=>num(r.amount)); el.className='hint '+(JB.total&&s!==num(JB.total)?'sum-bad':'sum-ok'); el.textContent='Suma de abonos '+money(s)+(JB.total?(s===num(JB.total)?' · coincide con el total':' · difiere del total en '+money(Math.abs(num(JB.total)-s))):''); };
+  const prevJ=()=>{ const el=$('#jb-prev'); if(!el) return; const g=jobMonths(); el.textContent=g.length?'Se programarán '+g.length+' '+plural(g.length,'factura','facturas')+' de '+money(num(JB.monthly))+' (total '+money(sum(g,x=>x.amount))+').':'Indique el primer mes para ver el calendario.'; };
+  const jobMonths=()=>{ const out=[], fm=(JB.firstMonth||'').split('-').map(Number); if(fm.length<2||!fm[0]) return out; const day=Math.min(31,Math.max(1,Number(JB.billDay)||1)), n=Math.min(36,Math.max(1,Number(JB.months)||1));
+    for(let i=0;i<n;i++){ let y=fm[0], m=fm[1]+i; y+=Math.floor((m-1)/12); m=((m-1)%12)+1; const bill=y+'-'+pad(m)+'-'+pad(Math.min(day,new Date(y,m,0).getDate())); out.push({label:'Mensualidad '+monthName(y,m),amount:num(JB.monthly),billDate:bill,dueDate:addDays(bill,Number(JB.term)||0),kind:'mensual'}); } return out; };
+  openModal({title:'Nuevo trabajo para '+c.name,wide:true,
+    body:'<p class="hint" style="margin:0">Cada trabajo tiene su propio valor, forma de pago y saldo. Los cobros quedan agrupados bajo el nombre del trabajo en la pestaña Pagos.</p>'
+     +'<div class="fld"><label for="jb-name">Nombre del trabajo</label><input class="inp" id="jb-name" data-jb="name" placeholder="Ej. Página web, Campaña de octubre, Soporte mensual…"></div>'
+     +'<div class="fld"><span class="lab">Forma de pago</span><div class="seg" id="jb-mode" style="grid-template-columns:repeat(3,minmax(0,1fr))"></div></div><div id="jb-pay" style="display:flex;flex-direction:column;gap:12px"></div>',
+    onMount:root=>{
+      paintJ(); $('#jb-name').focus();
+      root.addEventListener('input',e=>{
+        const t=e.target, f=t.dataset.jb, r=t.dataset.jr, i=Number(t.dataset.i);
+        if(f){ if(t.type==='checkbox') JB[f]=t.checked; else if(f==='total'||f==='monthly'){ JB[f]=num(t.value); if(f==='total'&&JB.mode==='abonos'){ JB.rows.forEach((x,k)=>{ if(x.auto){ x.amount=Math.round(JB.total*(x.pct/100)); const el=$('#jr-amt-'+k); if(el) el.value=grp(x.amount); } }); sumJ(); } else prevJ(); } else { JB[f]=t.type==='number'?Number(t.value):t.value; if(JB.mode==='mensual') prevJ(); } }
+        else if(r){ if(r==='amount'){ JB.rows[i].amount=num(t.value); JB.rows[i].auto=false; sumJ(); } else JB.rows[i][r]=t.value; }
+      });
+      root.addEventListener('change',e=>{ const t=e.target; if(t.dataset.jb==='total'||t.dataset.jb==='monthly'||t.dataset.jr==='amount') t.value=grp(num(t.value)); if(t.dataset.jb==='past') JB.past=t.checked; });
+      root.addEventListener('click',e=>{
+        const b=e.target.closest('[data-jm]'); if(!b||b.closest('#m-foot')) return; const m=b.dataset.jm, i=Number(b.dataset.i);
+        if(m==='mode'){ JB.mode=b.dataset.k; paintJ(); }
+        else if(m==='add-row'){ JB.rows.push({label:'Abono adicional',pct:0,auto:false,amount:0,bill:'',due:'',st:'porfacturar'}); paintJ(); }
+        else if(m==='del-row'){ JB.rows.splice(i,1); paintJ(); }
+      });
+    },
+    actions:[{label:'Cancelar',fn:()=>true},{label:'Crear trabajo',kind:'pri',fn:async()=>{
+      const name=(JB.name||'').trim(); if(!name){ toast('Escriba el nombre del trabajo.'); return false; }
+      if(jobsOf(c).some(j=>j.name.toLowerCase()===name.toLowerCase())){ toast('Ya existe un trabajo con ese nombre. Use otro nombre.'); return false; }
+      let pays=[];
+      if(JB.mode==='unico'){
+        if(!num(JB.total)||!JB.bill){ toast('Indique el valor y la fecha de facturación.'); return false; }
+        pays=[{label:'Pago único',amount:num(JB.total),billDate:JB.bill,dueDate:JB.due||JB.bill,kind:'abono',st:JB.st||'porfacturar'}];
+      } else if(JB.mode==='abonos'){
+        pays=JB.rows.filter(r=>num(r.amount)>0||String(r.label||'').trim()).map(r=>({label:String(r.label||'').trim()||'Abono',amount:num(r.amount),billDate:r.bill,dueDate:r.due||r.bill,kind:'abono',st:r.st||'porfacturar'}));
+        if(!pays.length||pays.some(p=>!p.amount||!p.billDate)){ toast('Cada abono necesita valor y fecha de facturación.'); return false; }
+      } else {
+        if(!num(JB.monthly)){ toast('Indique el valor mensual.'); return false; }
+        const t0=todayS(); pays=jobMonths().map(x=>Object.assign(x,{st:JB.past&&x.billDate<t0?'pagado':'porfacturar'})); if(!pays.length){ toast('Indique el primer mes a facturar.'); return false; }
+      }
+      const now=new Date().toISOString(); let n=paysOf(c.id).length;
+      for(const p of pays){ n++; const st=p.st; delete p.st; p.label=jobLabel(name,p.label);
+        await saveDoc('payments',null,Object.assign({clientId:c.id,seq:n,createdAt:now,job:name},p,statusData(st,Object.assign({doc:c.docType},p),now))); }
+      S.tab='pay'; toast('Trabajo «'+name+'» agregado con su plan de pagos'); }}]});
+}
+function editJobForm(c,job){
+  const ps=paysOf(c.id).filter(p=>jobOf(p)===job);
+  openModal({title:'Editar trabajo',
+    body:'<div class="fld"><label for="ej-name">Nombre del trabajo</label><input class="inp" id="ej-name" value="'+esc(job)+'" placeholder="Ej. Página web"><span class="hint">Al cambiar el nombre se actualizan los '+ps.length+' '+plural(ps.length,'cobro','cobros')+' de este trabajo.</span></div>'
+     +'<p class="hint" style="margin:0">Para eliminar el trabajo se borran también sus '+ps.length+' '+plural(ps.length,'cobro','cobros')+'. No se puede deshacer.</p>',
+    actions:[{label:'Eliminar trabajo',kind:'danger',keep:true,fn:b=>{ if(!b.dataset.armed){ b.dataset.armed='1'; b.classList.add('armed'); b.textContent='¿Confirmar eliminación?'; return; } (async()=>{ for(const p of ps) await delDoc('payments',p.id); closeModal(); toast('Trabajo eliminado'); })().catch(fail); }},
+      {label:'Cancelar',fn:()=>true},
+      {label:'Guardar',kind:'pri',fn:async()=>{
+        const nn=($('#ej-name').value||'').trim();
+        if(nn===job){ return true; }
+        if(nn&&jobsOf(c).some(j=>j.name.toLowerCase()===nn.toLowerCase()&&j.name!==job)){ toast('Ya existe un trabajo con ese nombre.'); return false; }
+        for(const p of ps) await patchDoc('payments',p.id,{job:nn,label:relabel(p.label,job,nn)});
+        toast('Trabajo actualizado'); }}]});
+}
 
 /* ───────── productos (catálogo sin valor fijo) ───────── */
 const SIZES=[['p1','Pequeña'],['p2','Mediana'],['p3','Grande']];
@@ -189,10 +265,11 @@ function quoteForm(q,pre){
 function paintQItems(){
   $('#q-items').innerHTML=Q.items.map((it,i)=>'<div class="qitem"><div class="qhead">'
    +'<div class="fld q-n"><label for="qi-n'+i+'">Servicio '+(i+1)+'</label><input class="inp" id="qi-n'+i+'" data-qi="1" data-f="name" data-i="'+i+'" placeholder="Ej. Gestión de redes sociales" value="'+esc(it.name)+'"></div>'
-   +'<div class="fld"><label for="qi-m'+i+'">Modalidad de pago</label><select class="inp" id="qi-m'+i+'" data-qi="1" data-f="mode" data-i="'+i+'"><option value="unico"'+(it.mode!=='mensual'?' selected':'')+'>Pago único</option><option value="mensual"'+(it.mode==='mensual'?' selected':'')+'>Pago mensual</option></select></div>'
+   +'<div class="fld"><label for="qi-m'+i+'">Modalidad de pago</label><select class="inp" id="qi-m'+i+'" data-qi="1" data-f="mode" data-i="'+i+'"><option value="unico"'+(it.mode!=='mensual'&&it.mode!=='abonos'?' selected':'')+'>Pago único</option><option value="abonos"'+(it.mode==='abonos'?' selected':'')+'>Abonos (anticipo y saldo)</option><option value="mensual"'+(it.mode==='mensual'?' selected':'')+'>Pago mensual</option></select></div>'
    +'<div class="fld"><label for="qi-q'+i+'">Cant.</label><input class="inp num" id="qi-q'+i+'" inputmode="numeric" data-qi="1" data-f="qty" data-i="'+i+'" value="'+esc(it.qty)+'"></div>'
    +'<div class="fld"><label for="qi-p'+i+'">Valor unitario (COP)</label><input class="inp num" id="qi-p'+i+'" inputmode="numeric" data-qi="1" data-f="price" data-i="'+i+'" value="'+esc(grp(it.price))+'"></div>'
    +'<button class="x" type="button" data-m="q-del" data-i="'+i+'" aria-label="Quitar servicio '+(i+1)+'">×</button></div>'
+   +(it.mode==='abonos'?'<div class="fld" style="max-width:260px"><label for="qi-a'+i+'">% de anticipo (el resto es el saldo)</label><input class="inp num" id="qi-a'+i+'" inputmode="numeric" data-qi="1" data-f="adv" data-i="'+i+'" value="'+esc(it.adv!=null?it.adv:50)+'"></div>':'')
    +'<div class="fld"><label for="qi-d'+i+'">Descripción del servicio</label><textarea class="inp" id="qi-d'+i+'" rows="3" data-qi="1" data-f="desc" data-i="'+i+'" placeholder="Alcance, entregables, frecuencia, qué incluye…">'+esc(it.desc)+'</textarea></div></div>').join('');
   updateQTot();
 }
@@ -210,6 +287,7 @@ function bindQuote(root){
   root.addEventListener('change',e=>{
     const t=e.target;
     if(t.dataset.f==='price') t.value=grp(num(t.value));
+    if(t.dataset.qi&&t.dataset.f==='mode'){ paintQItems(); }
     if(t.id==='q-size'){ Q.size=t.value; let n=0; Q.items.forEach(it=>{ if(it.pid&&!it.pe){ const pr=S.prods.find(x=>x.id===it.pid); if(pr){ it.price=qBasePrice(pr,Q.size); n++; } } }); if(n){ paintQItems(); toast('Precios base actualizados al tamaño elegido'); } }
     if(t.id==='q-prod'){ const pr=S.prods.find(x=>x.id===t.value); t.value=''; if(pr){ const it={name:pr.name,desc:pr.desc||'',mode:pr.mode==='mensual'?'mensual':'unico',qty:1,price:qBasePrice(pr,Q.size),pid:pr.id,pe:false};
         const f0=Q.items.length===1&&!(Q.items[0].name||'').trim()&&!Q.items[0].price&&!(Q.items[0].desc||'').trim(); if(f0) Q.items[0]=it; else Q.items.push(it); paintQItems(); if(!it.price) toast('Este producto no tiene precio base para ese tamaño. Ingréselo en la cotización.'); } }
@@ -223,7 +301,7 @@ function bindQuote(root){
   });
 }
 async function saveQuote(q,andPdf){
-  const items=Q.items.filter(i=>(i.name||'').trim()||i.price).map(i=>({pid:i.pid||'',name:(i.name||'').trim(),desc:(i.desc||'').trim(),mode:i.mode==='mensual'?'mensual':'unico',qty:Number(i.qty)||1,price:Number(i.price)||0}));
+  const items=Q.items.filter(i=>(i.name||'').trim()||i.price).map(i=>Object.assign({pid:i.pid||'',name:(i.name||'').trim(),desc:(i.desc||'').trim(),mode:i.mode==='mensual'?'mensual':(i.mode==='abonos'?'abonos':'unico'),qty:Number(i.qty)||1,price:Number(i.price)||0},i.mode==='abonos'?{adv:Math.min(99,Math.max(1,Number(i.adv)||50))}:{}));
   if(!(Q.cName||'').trim()){ toast('Indique el nombre del cliente.'); return false; }
   if(!items.length||items.some(i=>!i.name)){ toast('Cada servicio necesita un nombre.'); return false; }
   const num_=q?q.num:nextQNum(), now=new Date().toISOString();
@@ -302,40 +380,3 @@ async function buildPdf(q){
   [['Fecha',longDate(q.date)],['Vigencia',(Number(q.valid)||15)+' días (hasta '+longDate(until)+')'],['Elaborada por',ex.name]].forEach(r=>{ font('bold',9,GRAY); doc.text(T(r[0])+':',124,yr); font('normal',9.5,INK); const ls=lines(r[1],R-124-29); ls.forEach((l,i)=>{ doc.text(l,124+29,yr+i*4.6); }); yr+=Math.max(1,ls.length)*4.6+1.2; });
   y=Math.max(yl,yr)+5;
   if(q.title){ font('bolditalic',13,INK); lines(q.title,R-M).forEach(l=>{ doc.text(l,M,y); y+=6; }); y+=1; }
-  // tabla
-  const CX={svc:M+3,mod:98,qty:128,unit:156,sub:R-3}, SW=78;
-  function thead(){ doc.setFillColor(...DARK); doc.rect(M,y,R-M,8,'F'); font('bold',7.5,[255,255,255]); doc.text('SERVICIO',CX.svc,y+5.2); doc.text('MODALIDAD',CX.mod,y+5.2); doc.text('CANT.',CX.qty,y+5.2,{align:'right'}); doc.text('VALOR UNIT.',CX.unit,y+5.2,{align:'right'}); doc.text('SUBTOTAL',CX.sub,y+5.2,{align:'right'}); y+=8; }
-  function newPage(){ doc.addPage(); y=band(false); thead(); }
-  function need(h){ if(y+h>LIM){ doc.addPage(); y=band(false)+4; } }
-  thead();
-  (q.items||[]).forEach(it=>{
-    if(y+24>LIM) newPage();
-    const y0=y, men=it.mode==='mensual', val=(Number(it.price)||0)*(Number(it.qty)||1);
-    y+=5.5;
-    font('normal',8.5,INK); doc.text(men?'Pago mensual':'Pago único',CX.mod,y0+5.5);
-    doc.text(String(Number(it.qty)||1),CX.qty,y0+5.5,{align:'right'}); doc.text(pdfMoney(it.price),CX.unit,y0+5.5,{align:'right'});
-    font('bold',9,INK); doc.text(pdfMoney(val)+(men?' /mes':''),CX.sub,y0+5.5,{align:'right'});
-    font('bold',9.5,INK); lines(it.name,SW).forEach(l=>{ if(y>LIM){ newPage(); y+=5.5; font('bold',9.5,INK); } doc.text(l,CX.svc,y); y+=4.6; });
-    if(it.desc){ font('normal',8.5,GRAY); lines(it.desc,SW).forEach(l=>{ if(y>LIM){ newPage(); y+=5.5; font('normal',8.5,GRAY); } doc.text(l,CX.svc,y); y+=4; }); }
-    y+=2.5; doc.setDrawColor(...LINE); doc.setLineWidth(0.2); doc.line(M,y,R,y);
-  });
-  // totales
-  const t=qTotals(q); y+=5; need(30);
-  const rows=[]; if(t.u) rows.push(['Total pago único',pdfMoney(t.u)]); if(t.m) rows.push(['Total mensual',pdfMoney(t.m)+' / mes']);
-  rows.forEach(r=>{ doc.setFillColor(...DARK); doc.roundedRect(112,y,R-112,10,1.5,1.5,'F'); font('normal',9,[210,210,204]); doc.text(r[0],116,y+6.4); font('bold',12,GREEN); doc.text(r[1],R-4,y+6.8,{align:'right'}); y+=12; });
-  font('normal',7.5,GRAY); doc.text('Valores en pesos colombianos (COP).',R,y+1,{align:'right'}); y+=8;
-  // condiciones
-  if(q.notes){ need(24); label('Condiciones y observaciones',M,y); y+=5; font('normal',9,INK); lines(q.notes,R-M).forEach(l=>{ if(y>LIM){ doc.addPage(); y=band(false)+4; font('normal',9,INK); } doc.text(l,M,y); y+=4.5; }); y+=4; }
-  // firma
-  need(34);
-  doc.setFillColor(...GREEN); doc.rect(M,y,22,1,'F'); y+=7;
-  font('normal',9.5,GRAY); doc.text('Atentamente,',M,y); y+=7;
-  font('bolditalic',12,INK); doc.text(T(ex.name),M,y); y+=5.2;
-  font('normal',9.5,INK);
-  [ex.cargo,E.nombre,(ex.phone||E.tel)&&('Tel. '+(ex.phone||E.tel)),(ex.email||E.email)].filter(Boolean).forEach(l=>{ doc.text(T(l),M,y); y+=4.7; });
-  // pie en todas las páginas
-  const n=doc.getNumberOfPages();
-  for(let i=1;i<=n;i++){
-    doc.setPage(i);
-    doc.setFillColor(...DARK); doc.rect(0,H-13,W,13,'F');
-    [[155,230,53],[109,194,26],[62,142,15]].forEach((c,k)=>{ doc.setFillColor(c[0],c[1],c[2]); doc.rect(k*W/3,H-14.2,W/3+0.3,1.2,'F'); });
