@@ -80,12 +80,13 @@ function drawHome(){
   wk.sort((a,b)=>a.due.localeCompare(b.due)||(a.title||'').localeCompare(b.title||'','es'));
   h+='<section class="panel" style="margin-bottom:16px"><div class="panel-h" style="flex-wrap:wrap"><div><h2>Prioridades de la semana</h2><div class="hint" style="margin-top:3px">Semana del '+fmtD(ws)+' al '+fmtD(we)+'. Primero lo vencido, después lo que entregamos pronto.</div></div>'
    +'<div class="svc"><button type="button" data-act="prio" data-o="todos" aria-pressed="'+(S.prio==='todos')+'">Todos</button><button type="button" data-act="prio" data-o="Laura" aria-pressed="'+(S.prio==='Laura')+'">Laura · '+cntL+'</button><button type="button" data-act="prio" data-o="Diego" aria-pressed="'+(S.prio==='Diego')+'">Diego · '+cntD+'</button></div></div>';
+  h+='<div class="legend"><span><i style="background:var(--bad)"></i>Vencida</span><span><i style="background:#FF9F43"></i>Para hoy</span><span><i style="background:var(--warn)"></i>Para mañana</span><span><i style="background:var(--accent)"></i>Resto de la semana</span></div>';
   if(!wk.length) h+='<div class="empty">No hay entregas vencidas ni programadas para esta semana'+(S.prio!=='todos'?' a nombre de '+S.prio:'')+'.</div>';
   else {
     let last='';
     wk.forEach(x=>{ const c=clientById(x.clientId), d=dayDiff(x.due,t), lab=dayLabel(d,x.due);
-      if(lab!==last){ last=lab; h+='<div class="day '+(d<0?'bad':(d<=1?'warn':''))+'">'+esc(lab)+(d<0?'':'')+'</div>'; }
-      h+='<div class="row click" data-act="open-client" data-id="'+esc(c.id)+'" data-tab="seg" tabindex="0"><span class="stripe '+(d<=0?'bad':(d===1?'warn':'info'))+'"></span>'+logoHTML(c,'sm')+'<div class="r-main"><div class="r-title">'+esc(x.title)+'</div><div class="r-sub">'+esc(c.name)+(d<0?' · pactada el '+fmtD(x.due):'')+'</div></div><div class="r-end">'+ownerPill(x.owner)+'<div style="margin-top:4px">'+(d<0?'<span class="pill bad">Atrasada '+(-d)+' '+plural(-d,'día','días')+'</span>':(d===0?'<span class="pill bad">Entregar hoy</span>':(d===1?'<span class="pill warn">Entregar mañana</span>':'<span class="pill">'+fmtD(x.due)+'</span>')))+'</div></div></div>';
+      if(lab!==last){ last=lab; h+='<div class="day '+(d<0?'bad':(d===0?'hoy':(d===1?'warn':'ok')))+'">'+esc(lab)+(d<0?'':'')+'</div>'; }
+      h+='<div class="row click pri lv-'+(d<0?'bad':(d===0?'hoy':(d===1?'man':'ok')))+'" data-act="open-client" data-id="'+esc(c.id)+'" data-tab="seg" tabindex="0">'+logoHTML(c,'sm')+'<div class="r-main"><div class="r-title">'+esc(x.title)+'</div><div class="r-sub">'+esc(c.name)+(d<0?' · pactada el '+fmtD(x.due):'')+'</div></div><div class="r-end">'+ownerPill(x.owner)+'<div style="margin-top:4px">'+(d<0?'<span class="pill bad">Atrasada '+(-d)+' '+plural(-d,'día','días')+'</span>':(d===0?'<span class="pill warn">Entregar hoy</span>':(d===1?'<span class="pill warn">Entregar mañana</span>':'<span class="pill">'+fmtD(x.due)+'</span>')))+'</div></div></div>';
     });
   }
   h+='</section>';
