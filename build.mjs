@@ -40,6 +40,8 @@ if (target === 'artifact') {
   const doc2 = doc.replace('<script>\n', pwa + '<script>\n');
   fs.writeFileSync(path.join(root, 'dist/index.html'), doc2);
   console.log('dist/index.html', doc2.length);
+  const logoFile = path.join(root, 'assets/logo_h.png');
+  if (fs.existsSync(logoFile)) fs.copyFileSync(logoFile, path.join(root, 'dist/logo-h.png'));
   const symFile = path.join(root, 'assets/logo_sym.png');
   if (fs.existsSync(symFile)) {
     fs.writeFileSync(path.join(root, 'dist/icon-512.png'), makeIcon(symFile, 512));
