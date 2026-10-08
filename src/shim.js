@@ -115,9 +115,9 @@
   function showLogin(){
     return new Promise(resolve=>{
       const ov=document.createElement('div');
-      ov.style.cssText='position:fixed;inset:0;z-index:99999;background:#0E0B0A;display:flex;align-items:center;justify-content:center;padding:16px;font-family:Montserrat,Arial,sans-serif;color:#F5F2ED';
-      ov.innerHTML='<form id="dl-lg" style="width:100%;max-width:360px;background:#181311;border:1px solid #33292A;border-radius:16px;padding:28px;display:flex;flex-direction:column;gap:14px;box-shadow:0 20px 60px rgba(0,0,0,.5)">'
-        +'<div style="font-weight:800;font-size:22px;font-style:italic">D&amp;L <span style="color:#7ED321">Hnos. Lozano</span></div>'
+      ov.style.cssText='position:fixed;inset:0;z-index:99999;background:#0E0B0A;display:flex;align-items:flex-start;justify-content:center;padding:max(24px,7vh) 16px 16px;overflow-y:auto;font-family:Montserrat,Arial,sans-serif;color:#F5F2ED';
+      ov.innerHTML='<form id="dl-lg" style="width:100%;max-width:360px;background:#1A1412;border:1px solid #33292A;border-radius:16px;padding:28px;display:flex;flex-direction:column;gap:14px;box-shadow:0 20px 60px rgba(0,0,0,.5)">'
+        +'<img src="/logo-h.png" alt="D&amp;L Hnos. Lozano" style="width:100%;max-width:300px;height:auto;display:block;margin:0 auto 4px">'
         +'<div style="color:#A59C94;font-size:13px;margin-top:-6px">Ingrese para ver el tablero de clientes.</div>'
         +'<label style="font-size:12px;color:#A59C94;display:flex;flex-direction:column;gap:6px">Usuario<input id="dl-u" autocomplete="username" autocapitalize="none" required style="padding:12px;border-radius:10px;border:1px solid #33292A;background:#0E0B0A;color:#F5F2ED;font-size:15px"></label>'
         +'<label style="font-size:12px;color:#A59C94;display:flex;flex-direction:column;gap:6px">Contraseña<input id="dl-p" type="password" autocomplete="current-password" required style="padding:12px;border-radius:10px;border:1px solid #33292A;background:#0E0B0A;color:#F5F2ED;font-size:15px"></label>'
