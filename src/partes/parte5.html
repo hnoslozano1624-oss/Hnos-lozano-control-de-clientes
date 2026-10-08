@@ -1,3 +1,40 @@
+  // tabla
+  const CX={svc:M+3,mod:98,qty:128,unit:156,sub:R-3}, SW=78;
+  function thead(){ doc.setFillColor(...DARK); doc.rect(M,y,R-M,8,'F'); font('bold',7.5,[255,255,255]); doc.text('SERVICIO',CX.svc,y+5.2); doc.text('MODALIDAD',CX.mod,y+5.2); doc.text('CANT.',CX.qty,y+5.2,{align:'right'}); doc.text('VALOR UNIT.',CX.unit,y+5.2,{align:'right'}); doc.text('SUBTOTAL',CX.sub,y+5.2,{align:'right'}); y+=8; }
+  function newPage(){ doc.addPage(); y=band(false); thead(); }
+  function need(h){ if(y+h>LIM){ doc.addPage(); y=band(false)+4; } }
+  thead();
+  (q.items||[]).forEach(it=>{
+    if(y+24>LIM) newPage();
+    const y0=y, men=it.mode==='mensual', val=(Number(it.price)||0)*(Number(it.qty)||1);
+    y+=5.5;
+    font('normal',8.5,INK); doc.text(men?'Pago mensual':(it.mode==='abonos'?'Abonos '+(Number(it.adv)||50)+'/'+(100-(Number(it.adv)||50)):'Pago único'),CX.mod,y0+5.5);
+    doc.text(String(Number(it.qty)||1),CX.qty,y0+5.5,{align:'right'}); doc.text(pdfMoney(it.price),CX.unit,y0+5.5,{align:'right'});
+    font('bold',9,INK); doc.text(pdfMoney(val)+(men?' /mes':''),CX.sub,y0+5.5,{align:'right'});
+    font('bold',9.5,INK); lines(it.name,SW).forEach(l=>{ if(y>LIM){ newPage(); y+=5.5; font('bold',9.5,INK); } doc.text(l,CX.svc,y); y+=4.6; });
+    if(it.desc){ font('normal',8.5,GRAY); lines(it.desc,SW).forEach(l=>{ if(y>LIM){ newPage(); y+=5.5; font('normal',8.5,GRAY); } doc.text(l,CX.svc,y); y+=4; }); }
+    y+=2.5; doc.setDrawColor(...LINE); doc.setLineWidth(0.2); doc.line(M,y,R,y);
+  });
+  // totales
+  const t=qTotals(q); y+=5; need(30);
+  const rows=[]; if(t.u) rows.push(['Total pago único',pdfMoney(t.u)]); if(t.m) rows.push(['Total mensual',pdfMoney(t.m)+' / mes']);
+  rows.forEach(r=>{ doc.setFillColor(...DARK); doc.roundedRect(112,y,R-112,10,1.5,1.5,'F'); font('normal',9,[210,210,204]); doc.text(r[0],116,y+6.4); font('bold',12,GREEN); doc.text(r[1],R-4,y+6.8,{align:'right'}); y+=12; });
+  font('normal',7.5,GRAY); doc.text('Valores en pesos colombianos (COP).',R,y+1,{align:'right'}); y+=8;
+  // condiciones
+  if(q.notes){ need(24); label('Condiciones y observaciones',M,y); y+=5; font('normal',9,INK); lines(q.notes,R-M).forEach(l=>{ if(y>LIM){ doc.addPage(); y=band(false)+4; font('normal',9,INK); } doc.text(l,M,y); y+=4.5; }); y+=4; }
+  // firma
+  need(34);
+  doc.setFillColor(...GREEN); doc.rect(M,y,22,1,'F'); y+=7;
+  font('normal',9.5,GRAY); doc.text('Atentamente,',M,y); y+=7;
+  font('bolditalic',12,INK); doc.text(T(ex.name),M,y); y+=5.2;
+  font('normal',9.5,INK);
+  [ex.cargo,E.nombre,(ex.phone||E.tel)&&('Tel. '+(ex.phone||E.tel)),(ex.email||E.email)].filter(Boolean).forEach(l=>{ doc.text(T(l),M,y); y+=4.7; });
+  // pie en todas las páginas
+  const n=doc.getNumberOfPages();
+  for(let i=1;i<=n;i++){
+    doc.setPage(i);
+    doc.setFillColor(...DARK); doc.rect(0,H-13,W,13,'F');
+    [[155,230,53],[109,194,26],[62,142,15]].forEach((c,k)=>{ doc.setFillColor(c[0],c[1],c[2]); doc.rect(k*W/3,H-14.2,W/3+0.3,1.2,'F'); });
     font('normal',7.5,[200,200,194]);
     const info=[E.nombre,E.nit&&('NIT '+E.nit),E.dir,E.web,E.tel&&('Tel. '+E.tel),E.email].filter(Boolean).join('  ·  ');
     doc.text(T(info),W/2,H-7.2,{align:'center',maxWidth:W-2*M});
