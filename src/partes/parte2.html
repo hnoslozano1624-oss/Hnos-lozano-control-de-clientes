@@ -1,31 +1,3 @@
-    if(t.hasAttribute('data-close')) return closeModal();
-    if(t.dataset.i!=null && foot.contains(t)){
-      const a=actions[Number(t.dataset.i)];
-      if(a.keep){ a.fn&&a.fn(t); return; }
-      t.disabled=true;
-      try{ const ok=await a.fn(t); if(ok!==false) closeModal(); else t.disabled=false; }
-      catch(err){ t.disabled=false; fail(err); }
-    }
-  };
-  const esc_=e=>{ if(e.key==='Escape') closeModal(); };
-  document.addEventListener('keydown',esc_); modalCleanup=()=>document.removeEventListener('keydown',esc_);
-  if(onMount) onMount(root);
-  const f=$('input,textarea,select',$('#m-body')); if(f && !wide) f.focus();
-}
-function fail(err){
-  const c=err&&err.code, m={quota_exceeded:'Se alcanzó el límite de almacenamiento.',too_large:'El archivo supera el tamaño permitido (20 MB).',unsupported_type:'Tipo de archivo no admitido. Use PDF o imagen (PNG, JPG).',invalid_argument:'No tiene permiso para guardar cambios en este tablero.',not_granted:'No tiene permiso para esta acción.',rate_limited:'Demasiadas acciones seguidas. Intente de nuevo en unos segundos.'};
-  toast(m[c]||('No se pudo guardar. '+((err&&err.message)||'Intente de nuevo.')));
-}
-
-/* ───────── archivos de soporte ───────── */
-async function uploadFile(file){
-  if(!file) return null;
-  if(!S.assets) throw {message:'La carga de archivos no está disponible para su usuario. Use un enlace.'};
-  const r=await S.assets.upload(file);
-  return {fileId:r.id,fileName:file.name,fileType:r.contentType};
-}
-function supportHTML(o){
-  let h='';
   if(o.link) h+='<a class="sup" href="'+esc(safeUrl(o.link))+'" target="_blank" rel="noopener">Enlace ↗</a>';
   if(o.fileId){
     const img=/^image\//.test(o.fileType||'');
@@ -323,7 +295,7 @@ function drawClient(){
   let h=head('<button class="btn pri" data-act="add-task" type="button">+ Nueva tarea</button>');
   h+='<button class="link back" data-act="home" type="button">← Todos los clientes</button>';
   h+='<div class="c-head"><div style="display:flex;gap:16px;align-items:flex-start;min-width:0">'+logoHTML(c,'lg')+'<div style="min-width:0"><h1>'+esc(c.name)+'</h1><div class="chips" style="margin-top:8px"><span class="pill '+(c.payMode==='mensual'?'info':'')+'">'+(c.payMode==='mensual'?'Pago mensual':'Pago por abonos')+'</span>'+(c.status==='cerrado'?'<span class="pill">Inactivo</span>':'')+(c.contact?'<span class="chip">'+esc(c.contact)+'</span>':'')+(c.startDate?'<span class="chip">Inicio '+fmtD(c.startDate)+'</span>':'')+(c.endDate?'<span class="chip">Entrega '+fmtD(c.endDate)+'</span>':'')+'</div>'
-   +(c.scope?'<div class="ctx">'+esc(c.scope)+'</div>':'')+'</div></div></div>';
+   +(c.scope?'<div class="ctx">'+esc(c.scope)+'</div>':'')+'<div style="margin-top:12px"><button class="btn sm" data-act="edit-client" type="button">Editar datos y foto</button></div></div></div></div>';
   h+='<section class="stats" aria-label="Resumen del cliente">'
    +stat('Cuentas por cobrar',money(s.mes),s.mesN+' '+plural(s.mesN,'cobro acumulado','cobros acumulados')+(s.atras?' · incluye '+money(s.atras)+' vencido':''),s.atras?'warm':'')
    +stat('Fecha próxima factura',s.nextBill?fmtD(s.nextBill.billDate):'—',s.nextBill?esc2(s.nextBill.label)+' · '+money(s.nextBill.amount):'Nada por facturar',s.nextBill&&payAlert(s.nextBill,c)?(payAlert(s.nextBill,c).lvl==='bad'?'hot':'warm'):'')
@@ -339,3 +311,72 @@ const esc2 = esc;
 function logoHTML(c,size){
   const cls='logo '+(size||'');
   if(c&&c.logoId) return '<img class="'+cls+'" src="/_blob/'+esc(c.logoId)+'" alt="Logo de '+esc(c.name)+'">';
+  const ini=String((c&&c.name)||'?').trim().split(/\s+/).slice(0,2).map(w=>w.charAt(0)).join('').toUpperCase();
+  return '<span class="'+cls+' ini" aria-hidden="true">'+esc(ini)+'</span>';
+}
+
+function dueChip(t){
+  if(!t.due) return '';
+  const d=dayDiff(t.due,todayS());
+  if(t.done) return '<span class="pill">'+fmtD(t.due)+'</span>';
+  if(d<0) return '<span class="pill bad">Vencida · '+fmtD(t.due)+'</span>';
+  if(d===0) return '<span class="pill warn">Hoy</span>';
+  if(d<=3) return '<span class="pill warn">'+fmtD(t.due)+'</span>';
+  return '<span class="pill">'+fmtD(t.due)+'</span>';
+}
+function ownerPill(o){ return o?'<span class="pill '+(o==='Diego'?'diego':'laura')+'">'+esc(o)+'</span>':''; }
+function tabSeg(c,s){
+  const pend=s.ts.filter(t=>!t.done).sort((a,b)=>(a.due||'9999').localeCompare(b.due||'9999'));
+  let h='<div class="toolbar"><h2>Plan de trabajo pendiente</h2><button class="btn sm" data-act="add-task" type="button">+ Agregar tarea</button></div>';
+  if(!pend.length) h+='<div class="empty">'+(s.all?'Todas las tareas están cumplidas. Revise la pestaña Ejecutado.':'Este cliente no tiene tareas. Agregue la primera.')+'</div>';
+  pend.forEach(t=>{
+    h+='<div class="task"><button class="chk" data-act="complete-task" data-id="'+esc(t.id)+'" type="button" aria-label="Marcar como cumplida: '+esc(t.title)+'"><svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 7.5l3 3 6-7"/></svg></button>'
+     +'<div class="r-main"><div class="r-title">'+esc(t.title)+'</div><div class="meta">'+dueChip(t)+ownerPill(t.owner)+supportHTML(t)+'</div>'+(t.notes?'<div class="r-sub" style="margin-top:4px">'+esc(t.notes)+'</div>':'')+'</div>'
+     +'<button class="btn sm" data-act="edit-task" data-id="'+esc(t.id)+'" type="button">Editar</button></div>';
+  });
+  return h;
+}
+function tabDone(c,s){
+  const d=s.ts.filter(t=>t.done).sort((a,b)=>(b.doneAt||'').localeCompare(a.doneAt||''));
+  if(!d.length) return '<div class="empty">Las tareas cumplidas se archivan aquí con su fecha y soporte.</div>';
+  let h='<div class="toolbar"><h2>Hoja de ejecutado</h2><span class="hint">'+d.length+' '+plural(d.length,'tarea cumplida','tareas cumplidas')+'</span></div><div class="tbl-wrap"><table><thead><tr><th>Tarea</th><th>Responsable</th><th>Fecha pactada</th><th>Cumplida</th><th>Soporte</th><th></th></tr></thead><tbody>';
+  d.forEach(t=>{ h+='<tr><td style="font-weight:600;min-width:200px">'+esc(t.title)+'</td><td>'+ownerPill(t.owner)+'</td><td class="num">'+fmtD(t.due)+'</td><td class="num">'+fmtD(t.doneAt)+(t.due&&t.doneAt&&dayDiff(t.doneAt,t.due)>0?' <span class="pill warn">+'+dayDiff(t.doneAt,t.due)+' d</span>':'')+'</td><td>'+(supportHTML(t)||'<span class="hint">—</span>')+'</td><td style="text-align:right"><button class="link" data-act="reopen-task" data-id="'+esc(t.id)+'" type="button">Reabrir</button></td></tr>'; });
+  return h+'</tbody></table></div>';
+}
+function payPill(p,c){
+  const st=payState(p), a=payAlert(p,c);
+  if(st==='pagado') return '<span class="pill ok">Pagado</span>';
+  if(st==='facturado') return '<span class="pill '+(a?'bad':'info')+'">'+(a?a.text:'Facturado, esperando pago')+'</span>';
+  return '<span class="pill '+(a?a.lvl:'')+'">'+(a?a.text:'Por facturar')+'</span>';
+}
+function payCard(p,c){
+  const st=payState(p), a=payAlert(p,c), t=todayS();
+  const billLate=!p.invoiced&&dayDiff(p.billDate,t)<0, billSoon=!p.invoiced&&a&&a.kind==='bill'&&!billLate;
+  let h='<article class="pay '+(st==='pagado'?'done':'')+'"><div class="pay-h"><div style="min-width:0"><h3>'+esc(p.label)+'</h3><div class="meta">'+payPill(p,c)+'</div></div><div class="pay-amt num">'+money(p.amount)+'</div></div>';
+  h+='<div class="steps">';
+  h+='<div class="step done"><span class="dot"></span><div><div class="t">Programado</div><div class="d">Facturar el '+fmtD(p.billDate)+(p.dueDate?' · pago esperado '+fmtD(p.dueDate):'')+'</div></div></div>';
+  if(p.invoiced) h+='<div class="step done"><span class="dot"></span><div><div class="t">'+(p.docType==='cuenta'?'Cuenta de cobro emitida':'Facturado')+(p.invoiceNo?' · N.º <span class="mono">'+esc(p.invoiceNo)+'</span>':'')+'</div><div class="d">'+fmtD(p.invoiceDate)+'</div><div class="meta">'+supportHTML({link:p.invoiceLink,fileId:p.invoiceFileId,fileName:p.invoiceFileName,fileType:p.invoiceFileType})+'</div></div></div>';
+  else h+='<div class="step '+(billLate?'late':(billSoon?'soon':''))+'"><span class="dot"></span><div><div class="t">Falta emitir factura o cuenta de cobro</div><div class="d">'+(billLate?'Debió facturarse el '+fmtD(p.billDate):'Fecha de facturación: '+fmtD(p.billDate))+'</div></div></div>';
+  if(p.received) h+='<div class="step done"><span class="dot"></span><div><div class="t">Dinero recibido · '+money(p.receivedAmount!=null?p.receivedAmount:p.amount)+'</div><div class="d">'+fmtD(p.receivedDate)+(p.receivedNote?' · '+esc(p.receivedNote):'')+'</div></div></div>';
+  else h+='<div class="step '+(a&&a.kind==='pay'?'late':'')+'"><span class="dot"></span><div><div class="t">Pendiente de cobro</div><div class="d">'+(p.dueDate?'Pago esperado '+fmtD(p.dueDate):'Sin fecha de pago esperada')+'</div></div></div>';
+  h+='</div><div class="pay-acts">';
+  if(!p.invoiced) h+='<button class="btn sm pri" data-act="invoice" data-id="'+esc(p.id)+'" type="button">Registrar factura o cuenta de cobro</button>';
+  else h+='<button class="btn sm" data-act="invoice" data-id="'+esc(p.id)+'" type="button">Editar '+(p.docType==='cuenta'?'cuenta de cobro':'factura')+'</button>';
+  h+='<button class="recv" data-act="'+(p.received?'unreceive':'receive')+'" data-id="'+esc(p.id)+'" type="button" '+(!p.invoiced&&!p.received?'disabled title="Registre primero la factura o cuenta de cobro"':'')+'><span class="chk '+(p.received?'on':'')+'"><svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 7.5l3 3 6-7"/></svg></span>'+(p.received?'Dinero recibido':'Ya entró el dinero')+'</button>';
+  h+='<button class="link" data-act="edit-pay" data-id="'+esc(p.id)+'" type="button">Editar pago</button></div>';
+  if((p.log||[]).length) h+='<details class="hist"><summary>Historial ('+p.log.length+')</summary><ul>'+p.log.slice().reverse().map(l=>'<li>'+esc(fmtTS(l.at))+' · '+esc(l.text)+'</li>').join('')+'</ul></details>';
+  return h+'</article>';
+}
+function tabPay(c,s){
+  const jobs=jobsOf(c);
+  const top='<div class="pay-sum">'+stat(c.payMode==='mensual'&&jobs.length<=1?'Programado':'Total acordado',money(s.total),s.ps.length+' '+plural(s.ps.length,'pago','pagos'),'')
+   +stat('Cobrado',money(s.paid),s.ps.filter(p=>p.received).length+' '+plural(s.ps.filter(p=>p.received).length,'cobro recibido','cobros recibidos'),'')
+   +stat('Cuentas por cobrar',money(s.mes),s.atras?'Pago pendiente del cliente; incluye '+money(s.atras)+' vencido':'Pago pendiente del cliente este mes',s.atras?'warm':'')
+   +stat('Cuentas por cobrar del contrato',money(s.saldo),s.ps.filter(p=>!p.received).length+' '+plural(s.ps.filter(p=>!p.received).length,'cobro por recibir','cobros por recibir')+' en total','')+'</div>';
+  if(jobs.length>1){
+    let h=top+'<div class="toolbar"><h2>Trabajos de este cliente</h2><button class="btn sm pri" data-act="new-job" type="button">+ Nuevo trabajo</button></div>';
+    jobs.forEach(j=>{
+      const js=jobStats(j.ps), pend=j.ps.filter(p=>!p.received), done=j.ps.filter(p=>p.received), men=j.ps.some(p=>p.kind==='mensual');
+      h+='<section class="panel" style="margin-bottom:18px"><div class="toolbar" style="margin-top:0"><div><h2>'+esc(jobTitle(j.name))+'</h2><div class="hint">'+jobMode(j.ps)+' · '+j.ps.length+' '+plural(j.ps.length,'pago','pagos')+'</div></div><span style="display:flex;gap:8px;flex-wrap:wrap">'
+       +(men?'<button class="btn sm" data-act="next-month" data-job="'+esc(j.name)+'" type="button">+ Agregar mes</button>':'')
+       +'<button class="btn sm" data-act="add-pay" data-job="'+esc(j.name)+'" type="button">+ Agregar pago</button><button class="btn sm" data-act="edit-job" data-job="'+esc(j.name)+'" type="button">Editar trabajo</button></span></div>'
