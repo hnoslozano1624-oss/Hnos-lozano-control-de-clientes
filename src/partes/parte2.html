@@ -302,9 +302,9 @@ function drawClient(){
    +stat('Total tareas pendientes',String(s.pending),s.late?s.late+' vencidas':'Sin vencidas',s.late?'hot':'')
    +stat('% de avance',s.pct+'%',s.done+' de '+s.all+' tareas cumplidas','good')
    +'</section>';
-  const tabs=[['seg','Seguimiento',s.pending],['pay','Pagos',s.ps.length],['done','Ejecutado',s.done],['info','Ficha','']];
+  const tabs=[['seg','Seguimiento',s.pending],['pay','Pagos',s.ps.length],['done','Ejecutado',s.done],['pw','Contraseñas',(c.creds||[]).length],['info','Ficha','']];
   h+='<div class="tabs" role="tablist">'+tabs.map(t=>'<button class="tab" role="tab" aria-selected="'+(S.tab===t[0])+'" data-act="tab" data-tab="'+t[0]+'" type="button">'+t[1]+(t[2]!==''?'<span class="n">'+t[2]+'</span>':'')+'</button>').join('')+'</div>';
-  h+= S.tab==='pay'?tabPay(c,s): S.tab==='done'?tabDone(c,s): S.tab==='info'?tabInfo(c,s,terms): tabSeg(c,s);
+  h+= S.tab==='pay'?tabPay(c,s): S.tab==='done'?tabDone(c,s): S.tab==='pw'?tabPw(c): S.tab==='info'?tabInfo(c,s,terms): tabSeg(c,s);
   return h;
 }
 const esc2 = esc;
