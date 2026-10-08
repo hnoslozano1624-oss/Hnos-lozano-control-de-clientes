@@ -121,11 +121,13 @@
         +'<div style="color:#A59C94;font-size:13px;margin-top:-6px">Ingrese para ver el tablero de clientes.</div>'
         +'<label style="font-size:12px;color:#A59C94;display:flex;flex-direction:column;gap:6px">Usuario<input id="dl-u" autocomplete="username" autocapitalize="none" required style="padding:12px;border-radius:10px;border:1px solid #33292A;background:#0E0B0A;color:#F5F2ED;font-size:15px"></label>'
         +'<label style="font-size:12px;color:#A59C94;display:flex;flex-direction:column;gap:6px">Contraseña<input id="dl-p" type="password" autocomplete="current-password" required style="padding:12px;border-radius:10px;border:1px solid #33292A;background:#0E0B0A;color:#F5F2ED;font-size:15px"></label>'
+        +'<label style="font-size:13px;color:#A59C94;display:flex;align-items:center;gap:8px;cursor:pointer"><input id="dl-sh" type="checkbox" style="width:18px;height:18px;accent-color:#7ED321">Mostrar contraseña</label>'
         +'<div id="dl-e" role="alert" style="color:#ff8a80;font-size:13px;min-height:18px"></div>'
         +'<button type="submit" style="padding:13px;border:0;border-radius:10px;background:#7ED321;color:#0D0D0D;font-weight:700;font-size:15px;cursor:pointer">Ingresar</button></form>';
       document.body.appendChild(ov);
       const f=ov.querySelector('#dl-lg'), er=ov.querySelector('#dl-e'), bt=f.querySelector('button');
       ov.querySelector('#dl-u').focus();
+      ov.querySelector('#dl-sh').addEventListener('change',e=>{ ov.querySelector('#dl-p').type=e.target.checked?'text':'password'; });
       f.addEventListener('submit',async e=>{
         e.preventDefault(); er.textContent=''; bt.disabled=true; bt.textContent='Verificando…';
         try{
