@@ -12,20 +12,20 @@
     doc.text(String(Number(it.qty)||1),CX.qty,y0+5.5,{align:'right'}); doc.text(pdfMoney(it.price,CUR),CX.unit,y0+5.5,{align:'right'});
     font('bold',9,INK); doc.text(pdfMoney(val,CUR)+(men?L.mo:''),CX.sub,y0+5.5,{align:'right'});
     font('bold',9.5,INK); lines(it.name,SW).forEach(l=>{ if(y>LIM){ newPage(); y+=5.5; font('bold',9.5,INK); } doc.text(l,CX.svc,y); y+=4.6; });
-    if(it.desc){ font('normal',8.5,GRAY); lines(it.desc,SW).forEach(l=>{ if(y>LIM){ newPage(); y+=5.5; font('normal',8.5,GRAY); } doc.text(l,CX.svc,y); y+=4; }); }
-    y+=2.5; doc.setDrawColor(...LINE); doc.setLineWidth(0.2); doc.line(M,y,R,y);
+    if(it.desc){ font('normal',8.5-0.4*K,GRAY); lines(it.desc,SW).forEach(l=>{ if(y>LIM){ newPage(); y+=5.5; font('normal',8.5-0.4*K,GRAY); } doc.text(l,CX.svc,y); y+=4-0.3*K; }); }
+    y+=2.5-0.3*K; doc.setDrawColor(...LINE); doc.setLineWidth(0.2); doc.line(M,y,R,y);
   });
   // totales
   const t=qTotals(q); y+=5; need(30);
   const rows=[]; if(t.u) rows.push([L.tu,pdfMoney(t.u,CUR)]); if(t.m) rows.push([L.tm,pdfMoney(t.m,CUR)+L.pmo]);
   rows.forEach(r=>{ doc.setFillColor(...DARK); doc.roundedRect(112,y,R-112,10,1.5,1.5,'F'); font('normal',9,[210,210,204]); doc.text(r[0],116,y+6.4); font('bold',12,GREEN); doc.text(r[1],R-4,y+6.8,{align:'right'}); y+=12; });
-  font('normal',7.5,GRAY); doc.text(CUR==='USD'?L.usd:L.cop,R,y+1,{align:'right'}); y+=8;
+  font('normal',7.5,GRAY); doc.text(CUR==='USD'?L.usd:L.cop,R,y+1,{align:'right'}); y+=8-K;
   // condiciones
-  if(q.notes){ need(24); label(L.cond,M,y); y+=5; font('normal',9,INK); lines(q.notes,R-M).forEach(l=>{ if(y>LIM){ doc.addPage(); y=band(false)+4; font('normal',9,INK); } doc.text(l,M,y); y+=4.5; }); y+=4; }
+  if(q.notes){ need(24); label(L.cond,M,y); y+=5; font('normal',9-0.3*K,INK); lines(q.notes,R-M).forEach(l=>{ if(y>LIM){ doc.addPage(); y=band(false)+4; font('normal',9-0.3*K,INK); } doc.text(l,M,y); y+=4.5-0.3*K; }); y+=4-K; }
   // firma
-  need(34);
-  doc.setFillColor(...GREEN); doc.rect(M,y,22,1,'F'); y+=7;
-  font('normal',9.5,GRAY); doc.text(L.reg,M,y); y+=7;
+  need(34-3*K);
+  doc.setFillColor(...GREEN); doc.rect(M,y,22,1,'F'); y+=7-K;
+  font('normal',9.5,GRAY); doc.text(L.reg,M,y); y+=7-K;
   font('bolditalic',12,INK); doc.text(T(ex.name),M,y); y+=5.2;
   font('normal',9.5,INK);
   [ex.cargo,E.nombre,(ex.phone||E.tel)&&(L.tel+(ex.phone||E.tel)),(ex.email||E.email)].filter(Boolean).forEach(l=>{ doc.text(T(l),M,y); y+=4.7; });
@@ -40,7 +40,7 @@
     doc.text(T(info),W/2,H-7.2,{align:'center',maxWidth:W-2*M});
     font('normal',7,[150,150,144]); doc.text(L.page+i+L.of+n,W/2,H-3.4,{align:'center'});
   }
-  return doc.output('blob');
+  const bl=doc.output('blob'); bl.pg=n; return bl;
 }
 
 /* ───────── prospección por correo ───────── */
