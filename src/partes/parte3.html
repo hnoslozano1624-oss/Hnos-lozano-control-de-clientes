@@ -89,6 +89,7 @@ function act(a,d){
     case 'new-quote': quoteForm(null); break;
     case 'edit-quote': quoteForm(S.quotes.find(x=>x.id===d.id)); break;
     case 'pdf-quote': pdfQuote(S.quotes.find(x=>x.id===d.id)); break;
+    case 'pdf-quote-alt': { const q0=S.quotes.find(x=>x.id===d.id); if(q0) pdfQuote(Object.assign({},q0,{lang:q0.lang==='en'?'es':'en'})); break; }
     case 'company': companyForm(); break;
     case 'add-exp': expenseForm(null); break;
     case 'add-pend': expenseForm(null,'pendiente'); break;
@@ -271,10 +272,11 @@ const aqMode=m=>m==='mensual'?'Pago mensual':(m==='abonos'?'Abonos':'Pago único
 function approveQuoteForm(q){
   const t0=todayS(), c=q.clientId&&clientById(q.clientId);
   const defSaldo=(end,start)=>end||addDays(start,30);
-  AQ={q,start:t0,end:'',items:(q.items||[]).map((it,i)=>({i,on:true,t:false,name:it.name,desc:it.desc||'',val:(Number(it.price)||0)*(Number(it.qty)||1),mode:it.mode==='mensual'?'mensual':(it.mode==='abonos'?'abonos':'unico'),adv:Number(it.adv)||50,bill:t0,due:'',bill2:defSaldo('',t0),first:t0.slice(0,7),months:6,day:Number(t0.slice(8,10)),term:15}))};
+  const isU=qCur(q)==='USD';
+  AQ={q,cur:isU?'USD':'COP',trm:0,start:t0,end:'',items:(q.items||[]).map((it,i)=>({i,on:true,t:false,name:it.name,desc:it.desc||'',val:isU?0:(Number(it.price)||0)*(Number(it.qty)||1),usd:isU?(Number(it.price)||0)*(Number(it.qty)||1):0,mode:it.mode==='mensual'?'mensual':(it.mode==='abonos'?'abonos':'unico'),adv:Number(it.adv)||50,bill:t0,due:'',bill2:defSaldo('',t0),first:t0.slice(0,7),months:6,day:Number(t0.slice(8,10)),term:15}))};
   const paintA=()=>{
     $('#aq-items').innerHTML=AQ.items.map(x=>{
-      let h='<div class="qitem" style="'+(x.on?'':'opacity:.55')+'"><label style="display:flex;gap:10px;align-items:flex-start;text-transform:none;letter-spacing:0;font-weight:600;color:var(--fg);font-size:14px"><input type="checkbox" data-aq="on" data-i="'+x.i+'"'+(x.on?' checked':'')+' style="margin-top:3px"><span style="flex:1">'+esc(x.name)+'<span class="hint" style="display:block;font-weight:400">'+(x.desc?esc(x.desc.slice(0,140))+(x.desc.length>140?'…':''):'Sin descripción')+'</span></span></label>';
+      let h='<div class="qitem" style="'+(x.on?'':'opacity:.55')+'"><label style="display:flex;gap:10px;align-items:flex-start;text-transform:none;letter-spacing:0;font-weight:600;color:var(--fg);font-size:14px"><input type="checkbox" data-aq="on" data-i="'+x.i+'"'+(x.on?' checked':'')+' style="margin-top:3px"><span style="flex:1">'+esc(x.name)+'<span class="hint" style="display:block;font-weight:400">'+(x.desc?esc(x.desc.slice(0,140))+(x.desc.length>140?'…':''):'Sin descripción')+'</span>'+(x.usd?'<span class="hint" style="display:block;font-weight:700;color:var(--accent-ink)">Cotizado en '+esc(qMoney(x.usd,'USD'))+'</span>':'')+'</span></label>';
       if(x.on){
         h+='<div class="f3" style="margin-top:10px"><div class="fld"><label for="aq-m'+x.i+'">Forma de pago</label><select class="inp" id="aq-m'+x.i+'" data-aq="mode" data-i="'+x.i+'"><option value="unico"'+(x.mode==='unico'?' selected':'')+'>Pago único</option><option value="abonos"'+(x.mode==='abonos'?' selected':'')+'>Abonos (anticipo y saldo)</option><option value="mensual"'+(x.mode==='mensual'?' selected':'')+'>Pago mensual</option></select></div>'
          +'<div class="fld"><label for="aq-v'+x.i+'">'+(x.mode==='mensual'?'Valor mensual (COP)':'Valor acordado (COP)')+'</label><input class="inp num" id="aq-v'+x.i+'" inputmode="numeric" data-aq="val" data-i="'+x.i+'" value="'+grp(x.val)+'"></div>';
@@ -291,6 +293,7 @@ function approveQuoteForm(q){
   const sumTot=()=>{ const el=$('#aq-tot'); if(!el) return; const s=AQ.items.filter(x=>x.on); const u=sum(s.filter(x=>x.mode!=='mensual'),x=>x.val), m=sum(s.filter(x=>x.mode==='mensual'),x=>x.val); el.textContent=s.length+' de '+AQ.items.length+' '+plural(AQ.items.length,'servicio aceptado','servicios aceptados')+(u?' · Único/abonos '+money(u):'')+(m?' · Mensual '+money(m)+' /mes':''); };
   openModal({title:'Aprobar cotización N.º '+q.num+' · '+(q.cName||''),wide:true,
     body:'<p class="hint" style="margin:0">'+(c?'Se agregarán los servicios aceptados al cliente existente <b>'+esc(c.name)+'</b>.':'Se creará un cliente nuevo con los servicios aceptados.')+' Quite los servicios que el cliente <b>no</b> aprobó y elija la forma de pago de cada uno. Cada servicio queda como un trabajo aparte, con su propio valor y plan de pagos, y se genera su plan de tareas.</p>'
+     +(isU?'<div class="fld" style="max-width:320px"><label for="aq-trm">TRM: pesos por cada 1 USD</label><input class="inp num" id="aq-trm" inputmode="numeric" value="" placeholder="Ej. 4.000"><span class="hint">Esta cotización está en dólares. Los pagos y el flujo de caja se registran en pesos: valor en USD × TRM. Puede ajustar el valor de cada servicio.</span></div>':'')
      +'<div class="f2"><div class="fld"><label for="aq-start">Inicio del trabajo</label><input class="inp" id="aq-start" type="date" value="'+esc(AQ.start)+'"></div><div class="fld"><label for="aq-end">Entrega final (opcional)</label><input class="inp" id="aq-end" type="date" value="'+esc(AQ.end)+'"></div></div>'
      +'<div id="aq-items" style="display:flex;flex-direction:column;gap:12px"></div><div class="hint" id="aq-tot" style="font-weight:600;color:var(--fg)"></div>',
     onMount:root=>{
@@ -298,13 +301,15 @@ function approveQuoteForm(q){
       const upd=(x,f,v)=>{ x[f]=v; x.t=true; };
       root.addEventListener('input',e=>{
         const t=e.target;
+        if(t.id==='aq-trm'){ AQ.trm=num(t.value); AQ.items.forEach(x=>{ if(!x.vt) x.val=Math.round(x.usd*AQ.trm); }); paintA(); return; }
         if(t.id==='aq-start'||t.id==='aq-end'){ AQ[t.id==='aq-start'?'start':'end']=t.value; if(AQ.start){ AQ.items.forEach(x=>{ if(!x.t){ x.bill=AQ.start; x.first=AQ.start.slice(0,7); x.day=Number(AQ.start.slice(8,10)); x.bill2=AQ.end||addDays(AQ.start,30); } }); paintA(); } return; }
         const f=t.dataset.aq, x=AQ.items[Number(t.dataset.i)]; if(!f||!x||f==='on'||f==='mode') return;
-        if(f==='val') upd(x,'val',num(t.value)); else if(['adv','months','day','term'].includes(f)) upd(x,f,Number(t.value)); else upd(x,f,t.value);
+        if(f==='val'){ upd(x,'val',num(t.value)); x.vt=true; } else if(['adv','months','day','term'].includes(f)) upd(x,f,Number(t.value)); else upd(x,f,t.value);
         sumA(x); sumTot();
       });
       root.addEventListener('change',e=>{
-        const t=e.target, f=t.dataset.aq, x=AQ.items[Number(t.dataset.i)]; if(!f||!x) return;
+        const t=e.target; if(t.id==='aq-trm'){ t.value=grp(AQ.trm); return; }
+        const f=t.dataset.aq, x=AQ.items[Number(t.dataset.i)]; if(!f||!x) return;
         if(f==='on'){ x.on=t.checked; paintA(); }
         else if(f==='mode'){ x.mode=t.value; x.t=true; paintA(); }
         else if(f==='val'){ t.value=grp(num(t.value)); }
@@ -315,6 +320,7 @@ function approveQuoteForm(q){
 async function doApproveQuote(){
   const q=AQ.q, sel=AQ.items.filter(x=>x.on), t0=todayS();
   if(!sel.length){ toast('Elija al menos un servicio aceptado.'); return false; }
+  if(AQ.cur==='USD'&&!(AQ.trm>0)){ toast('Indique la TRM (pesos por cada dólar) para registrar los pagos en pesos.'); return false; }
   for(const x of sel){
     if(!num(x.val)){ toast('Indique el valor de «'+x.name+'».'); return false; }
     if(x.mode==='unico'&&!x.bill){ toast('«'+x.name+'» necesita fecha de facturación.'); return false; }
@@ -327,7 +333,7 @@ async function doApproveQuote(){
   if(c){ cid=c.id; await patchDoc('clients',cid,{services:[...new Set([...(c.services||[]),...keys])]}); }
   else {
     const men=sel.filter(x=>x.mode==='mensual');
-    const scope='Cotización N.º '+q.num+' aprobada. Alcance acordado:\n\n'+sel.map(x=>'• '+x.name+' ('+aqMode(x.mode).toLowerCase()+' · '+money(x.val)+(x.mode==='mensual'?' al mes':'')+')'+(x.desc?'\n  '+x.desc:'')).join('\n\n')+(q.notes?'\n\nCondiciones: '+q.notes:'');
+    const scope='Cotización N.º '+q.num+' aprobada. Alcance acordado:\n\n'+sel.map(x=>'• '+x.name+' ('+aqMode(x.mode).toLowerCase()+' · '+money(x.val)+(x.mode==='mensual'?' al mes':'')+(x.usd?' · cotizado en '+qMoney(x.usd,'USD')+', TRM '+grp(AQ.trm):'')+')'+(x.desc?'\n  '+x.desc:'')).join('\n\n')+(q.notes?'\n\nCondiciones: '+q.notes:'');
     cid=await saveDoc('clients',null,{job:'',logoId:null,docType:'factura',name:(q.cName||'').trim(),contact:[q.cContact,q.cEmail,q.cPhone].filter(Boolean).join(' · '),scope,services:keys,startDate:start,endDate:end,alertDays:3,status:'activo',payMode:men.length?'mensual':'abonos',total:men.length?null:sum(sel,x=>x.val),monthly:men.length?men[0].val:null,billDay:men.length?men[0].day:null,term:men.length?men[0].term:null,createdAt:now});
   }
   /* plan de tareas */
