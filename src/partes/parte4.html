@@ -208,7 +208,12 @@ function productForm(p){
 const QSTATUS={espera:['En espera','warn'],aprobada:['Aprobada','ok'],rechazada:['Rechazada','bad']};
 const qItem=()=>({name:'',desc:'',mode:'unico',qty:1,price:0});
 const qBasePrice=(pr,size)=>Number(pr[sizeKey[size]||'p2'])||0;
-const qBlank=()=>({size:'mediana',clientId:'',cName:'',cNit:'',cContact:'',cEmail:'',cPhone:'',title:'',date:todayS(),valid:15,exec:'laura',status:'espera',notes:'',items:[qItem()]});
+const qCur=q=>q&&q.cur==='USD'?'USD':'COP';
+const USDN={format:n=>{ n=Number(n)||0; const f=Math.round(n*100)%100===0?0:2; return new Intl.NumberFormat('en-US',{minimumFractionDigits:f,maximumFractionDigits:2}).format(n); }};
+const qMoney=(n,cur)=>cur==='USD'?'US$ '+USDN.format(Number(n)||0):money(n);
+const amt=(v,cur)=>{ if(cur!=='USD') return num(v); const t=String(v==null?'':v).replace(/[^\d.]/g,''); const i=t.indexOf('.'); const c=i<0?t:t.slice(0,i+1)+t.slice(i+1).replace(/\./g,''); return Math.round((Number(c)||0)*100)/100; };
+const grpC=(n,cur)=>!n?'':(cur==='USD'?USDN.format(n):grp(n));
+const qBlank=()=>({cur:'COP',lang:'es',size:'mediana',clientId:'',cName:'',cNit:'',cContact:'',cEmail:'',cPhone:'',title:'',date:todayS(),valid:15,exec:'laura',status:'espera',notes:'',items:[qItem()]});
 const nextQNum=()=>Math.max(99,...S.quotes.map(q=>Number(q.num)||0))+1;
 const qTotals=q=>{ let u=0,m=0; (q.items||[]).forEach(i=>{ const v=(Number(i.price)||0)*(Number(i.qty)||1); if(i.mode==='mensual') m+=v; else u+=v; }); return {u,m}; };
 function empData(){
@@ -218,21 +223,22 @@ function empData(){
 function drawCot(){
   const qs=S.quotes.slice().sort((a,b)=>(b.num||0)-(a.num||0));
   const esp=qs.filter(q=>!q.status||q.status==='espera'), apr=qs.filter(q=>q.status==='aprobada');
-  const tt=l=>l.reduce((a,q)=>{ const t=qTotals(q); return {u:a.u+t.u,m:a.m+t.m}; },{u:0,m:0});
+  const tt=l=>l.reduce((a,q)=>{ const t=qTotals(q); if(qCur(q)==='USD'){ a.uu+=t.u; a.um+=t.m; } else { a.u+=t.u; a.m+=t.m; } return a; },{u:0,m:0,uu:0,um:0});
+  const usdTxt=t=>(t.uu||t.um)?' · USD único '+qMoney(t.uu,'USD')+' · mensual '+qMoney(t.um,'USD'):'';
   const te=tt(esp), ta=tt(apr);
   let h=head('<button class="btn pri" data-act="new-quote" type="button">+ Nueva cotización</button>');
   h+='<div style="margin-bottom:6px"><h1>Cotizaciones</h1><div class="hint" style="margin-top:4px">Arme la propuesta de servicios de marketing y descárguela en PDF con el membrete de D&amp;L.</div></div>'+navTabs();
   h+='<section class="stats" aria-label="Cotizaciones">'
    +stat('Cotizaciones',String(qs.length),'Próximo consecutivo N.º '+nextQNum(),'')
-   +stat('En espera',String(esp.length),'Único '+money(te.u)+' · Mensual '+money(te.m),esp.length?'hot':'')
-   +stat('Aprobadas',String(apr.length),'Único '+money(ta.u)+' · Mensual '+money(ta.m),'good')
+   +stat('En espera',String(esp.length),'Único '+money(te.u)+' · Mensual '+money(te.m)+usdTxt(te),esp.length?'hot':'')
+   +stat('Aprobadas',String(apr.length),'Único '+money(ta.u)+' · Mensual '+money(ta.m)+usdTxt(ta),'good')
    +'</section>';
   h+='<div class="toolbar"><h2>Historial</h2><button class="btn sm" data-act="company" type="button">Datos de D&amp;L para el PDF</button></div>';
   if(!qs.length){ h+='<div class="welcome"><h3>Aún no hay cotizaciones</h3><p>Cree la primera: elija el cliente, agregue uno o varios servicios (pago único o mensual, cada uno con su descripción) y descargue el PDF. El consecutivo empieza en 100.</p><button class="btn pri" data-act="new-quote" type="button">Crear cotización</button></div>'; return h; }
   h+='<div class="tbl-wrap"><table><thead><tr><th>N.º</th><th>Fecha</th><th>Cliente</th><th>Servicios</th><th>Pago único</th><th>Mensual</th><th>Estado</th><th></th></tr></thead><tbody>';
   qs.forEach(q=>{ const t=qTotals(q), st=QSTATUS[q.status||'espera']||QSTATUS.espera, names=(q.items||[]).map(i=>i.name).filter(Boolean);
-    h+='<tr><td class="num" style="font-weight:800">'+esc(q.num)+'</td><td>'+esc(fmtD(q.date))+'</td><td style="font-weight:600">'+esc(q.cName||'—')+'</td><td class="hint" style="max-width:260px">'+esc(names.join(' · ')||'—')+'</td><td class="num">'+(t.u?esc(money(t.u)):'—')+'</td><td class="num">'+(t.m?esc(money(t.m))+' /mes':'—')+'</td><td><span class="pill '+st[1]+'">'+st[0]+'</span></td>'
-     +'<td style="white-space:nowrap">'+((!q.status||q.status==='espera')?'<button class="btn sm pri" data-act="approve-quote" data-id="'+esc(q.id)+'" type="button">Aprobar</button> ':'')+(q.status==='aprobada'&&!q.clientCreated&&!(q.clientId&&clientById(q.clientId))?'<button class="btn sm pri" data-act="quote-client" data-id="'+esc(q.id)+'" type="button">Crear cliente</button> ':'')+'<button class="btn sm" data-act="pdf-quote" data-id="'+esc(q.id)+'" type="button">PDF</button> <button class="btn sm" data-act="edit-quote" data-id="'+esc(q.id)+'" type="button">Editar</button></td></tr>'; });
+    h+='<tr><td class="num" style="font-weight:800">'+esc(q.num)+'</td><td>'+esc(fmtD(q.date))+'</td><td style="font-weight:600">'+esc(q.cName||'—')+'</td><td class="hint" style="max-width:260px">'+esc(names.join(' · ')||'—')+'<span class="pill" style="margin-left:6px">'+qCur(q)+' · '+(q.lang==='en'?'EN':'ES')+'</span></td><td class="num">'+(t.u?esc(qMoney(t.u,qCur(q))):'—')+'</td><td class="num">'+(t.m?esc(qMoney(t.m,qCur(q)))+' /mes':'—')+'</td><td><span class="pill '+st[1]+'">'+st[0]+'</span></td>'
+     +'<td style="white-space:nowrap">'+((!q.status||q.status==='espera')?'<button class="btn sm pri" data-act="approve-quote" data-id="'+esc(q.id)+'" type="button">Aprobar</button> ':'')+(q.status==='aprobada'&&!q.clientCreated&&!(q.clientId&&clientById(q.clientId))?'<button class="btn sm pri" data-act="quote-client" data-id="'+esc(q.id)+'" type="button">Crear cliente</button> ':'')+'<button class="btn sm" data-act="pdf-quote" data-id="'+esc(q.id)+'" type="button">PDF</button> <button class="btn sm" data-act="pdf-quote-alt" data-id="'+esc(q.id)+'" type="button" title="Descargar el PDF en el otro idioma sin cambiar la cotización">PDF '+(q.lang==='en'?'ES':'EN')+'</button> <button class="btn sm" data-act="edit-quote" data-id="'+esc(q.id)+'" type="button">Editar</button></td></tr>'; });
   return h+'</tbody></table></div>';
 }
 
@@ -248,6 +254,8 @@ function quoteForm(q,pre){
    '<div class="f3"><div class="fld"><label for="q-date">Fecha</label><input class="inp" id="q-date" type="date" data-q="date" value="'+esc(Q.date)+'"></div>'
    +'<div class="fld"><label for="q-valid">Vigencia (días)</label><input class="inp num" id="q-valid" type="number" min="1" data-q="valid" value="'+esc(Q.valid)+'"></div>'
    +'<div class="fld"><label for="q-exec">Ejecutivo que firma</label><select class="inp" id="q-exec" data-q="exec"><option value="laura"'+(Q.exec==='laura'?' selected':'')+'>'+esc(E.laura.name)+'</option><option value="diego"'+(Q.exec==='diego'?' selected':'')+'>'+esc(E.diego.name)+'</option></select></div></div>'
+   +'<div class="f2" style="margin-top:12px"><div class="fld"><label for="q-cur">Moneda de la cotización</label><select class="inp" id="q-cur" data-q="cur"><option value="COP"'+(Q.cur!=='USD'?' selected':'')+'>Pesos colombianos (COP)</option><option value="USD"'+(Q.cur==='USD'?' selected':'')+'>Dólares (USD)</option></select></div>'
+   +'<div class="fld"><label for="q-lang">Idioma del PDF</label><select class="inp" id="q-lang" data-q="lang"><option value="es"'+(Q.lang!=='en'?' selected':'')+'>Español</option><option value="en"'+(Q.lang==='en'?' selected':'')+'>Inglés (English)</option></select></div></div>'
    +'<hr class="hr"><div class="f2"><div class="fld"><label for="q-cli">Cliente</label><select class="inp" id="q-cli"><option value="">Prospecto o cliente nuevo (escribir datos)</option>'+S.clients.slice().sort((a,b)=>(a.name||'').localeCompare(b.name||'','es')).map(c=>'<option value="'+esc(c.id)+'"'+(Q.clientId===c.id?' selected':'')+'>'+esc(c.name)+'</option>').join('')+'</select></div>'
    +'<div class="fld"><label for="q-size">Tamaño de la empresa</label><select class="inp" id="q-size" data-q="size"><option value="pequena"'+(Q.size==='pequena'?' selected':'')+'>Pequeña</option><option value="mediana"'+(Q.size==='mediana'?' selected':'')+'>Mediana</option><option value="grande"'+(Q.size==='grande'?' selected':'')+'>Grande</option></select><span class="hint">Define el precio base de los productos del catálogo.</span></div></div>'
    +'<div class="f2"><div class="fld"><label for="q-name">Nombre o razón social</label><input class="inp" id="q-name" data-q="cName" value="'+esc(Q.cName)+'" placeholder="Nombre de la empresa o persona"></div><div class="fld"><label for="q-nit">NIT o cédula</label><input class="inp" id="q-nit" data-q="cNit" value="'+esc(Q.cNit)+'"></div></div>'
@@ -267,7 +275,7 @@ function paintQItems(){
    +'<div class="fld q-n"><label for="qi-n'+i+'">Servicio '+(i+1)+'</label><input class="inp" id="qi-n'+i+'" data-qi="1" data-f="name" data-i="'+i+'" placeholder="Ej. Gestión de redes sociales" value="'+esc(it.name)+'"></div>'
    +'<div class="fld"><label for="qi-m'+i+'">Modalidad de pago</label><select class="inp" id="qi-m'+i+'" data-qi="1" data-f="mode" data-i="'+i+'"><option value="unico"'+(it.mode!=='mensual'&&it.mode!=='abonos'?' selected':'')+'>Pago único</option><option value="abonos"'+(it.mode==='abonos'?' selected':'')+'>Abonos (anticipo y saldo)</option><option value="mensual"'+(it.mode==='mensual'?' selected':'')+'>Pago mensual</option></select></div>'
    +'<div class="fld"><label for="qi-q'+i+'">Cant.</label><input class="inp num" id="qi-q'+i+'" inputmode="numeric" data-qi="1" data-f="qty" data-i="'+i+'" value="'+esc(it.qty)+'"></div>'
-   +'<div class="fld"><label for="qi-p'+i+'">Valor unitario (COP)</label><input class="inp num" id="qi-p'+i+'" inputmode="numeric" data-qi="1" data-f="price" data-i="'+i+'" value="'+esc(grp(it.price))+'"></div>'
+   +'<div class="fld"><label for="qi-p'+i+'">Valor unitario ('+qCur(Q)+')</label><input class="inp num" id="qi-p'+i+'" inputmode="'+(qCur(Q)==='USD'?'decimal':'numeric')+'" data-qi="1" data-f="price" data-i="'+i+'" value="'+esc(grpC(it.price,qCur(Q)))+'"></div>'
    +'<button class="x" type="button" data-m="q-del" data-i="'+i+'" aria-label="Quitar servicio '+(i+1)+'">×</button></div>'
    +(it.mode==='abonos'?'<div class="fld" style="max-width:260px"><label for="qi-a'+i+'">% de anticipo (el resto es el saldo)</label><input class="inp num" id="qi-a'+i+'" inputmode="numeric" data-qi="1" data-f="adv" data-i="'+i+'" value="'+esc(it.adv!=null?it.adv:50)+'"></div>':'')
    +'<div class="fld"><label for="qi-d'+i+'">Descripción del servicio</label><textarea class="inp" id="qi-d'+i+'" rows="3" data-qi="1" data-f="desc" data-i="'+i+'" placeholder="Alcance, entregables, frecuencia, qué incluye…">'+esc(it.desc)+'</textarea></div></div>').join('');
@@ -275,22 +283,23 @@ function paintQItems(){
 }
 function updateQTot(){
   const t=qTotals(Q), el=$('#q-tot'); if(!el) return;
-  el.innerHTML=(t.u?'<span>Total pago único <b>'+esc(money(t.u))+'</b></span>':'')+(t.m?'<span>Total mensual <b>'+esc(money(t.m))+'</b></span>':'')+(!t.u&&!t.m?'<span class="hint">Ingrese el valor de cada servicio.</span>':'');
+  el.innerHTML=(t.u?'<span>Total pago único <b>'+esc(qMoney(t.u,qCur(Q)))+'</b></span>':'')+(t.m?'<span>Total mensual <b>'+esc(qMoney(t.m,qCur(Q)))+'</b></span>':'')+(!t.u&&!t.m?'<span class="hint">Ingrese el valor de cada servicio.</span>':'');
 }
 function bindQuote(root){
   root.addEventListener('input',e=>{
     const t=e.target;
     if(t.dataset.q){ const k=t.dataset.q; Q[k]=k==='valid'?(Number(t.value)||''):t.value; return; }
     if(t.dataset.qi){ const it=Q.items[Number(t.dataset.i)], f=t.dataset.f; if(!it) return;
-      if(f==='price'){ it.price=num(t.value); it.pe=true; } else if(f==='qty') it.qty=num(t.value)||1; else it[f]=t.value; updateQTot(); }
+      if(f==='price'){ it.price=amt(t.value,qCur(Q)); it.pe=true; } else if(f==='qty') it.qty=num(t.value)||1; else it[f]=t.value; updateQTot(); }
   });
   root.addEventListener('change',e=>{
     const t=e.target;
-    if(t.dataset.f==='price') t.value=grp(num(t.value));
+    if(t.dataset.f==='price') t.value=grpC(amt(t.value,qCur(Q)),qCur(Q));
+    if(t.id==='q-cur'){ Q.cur=t.value==='USD'?'USD':'COP'; paintQItems(); if(Q.items.some(i=>Number(i.price)>0)) toast('Cambió la moneda a '+Q.cur+'. Revise el valor de cada servicio.'); }
     if(t.dataset.qi&&t.dataset.f==='mode'){ paintQItems(); }
-    if(t.id==='q-size'){ Q.size=t.value; let n=0; Q.items.forEach(it=>{ if(it.pid&&!it.pe){ const pr=S.prods.find(x=>x.id===it.pid); if(pr){ it.price=qBasePrice(pr,Q.size); n++; } } }); if(n){ paintQItems(); toast('Precios base actualizados al tamaño elegido'); } }
-    if(t.id==='q-prod'){ const pr=S.prods.find(x=>x.id===t.value); t.value=''; if(pr){ const it={name:pr.name,desc:pr.desc||'',mode:pr.mode==='mensual'?'mensual':'unico',qty:1,price:qBasePrice(pr,Q.size),pid:pr.id,pe:false};
-        const f0=Q.items.length===1&&!(Q.items[0].name||'').trim()&&!Q.items[0].price&&!(Q.items[0].desc||'').trim(); if(f0) Q.items[0]=it; else Q.items.push(it); paintQItems(); if(!it.price) toast('Este producto no tiene precio base para ese tamaño. Ingréselo en la cotización.'); } }
+    if(t.id==='q-size'){ Q.size=t.value; let n=0; if(qCur(Q)!=='USD') Q.items.forEach(it=>{ if(it.pid&&!it.pe){ const pr=S.prods.find(x=>x.id===it.pid); if(pr){ it.price=qBasePrice(pr,Q.size); n++; } } }); if(n){ paintQItems(); toast('Precios base actualizados al tamaño elegido'); } }
+    if(t.id==='q-prod'){ const pr=S.prods.find(x=>x.id===t.value); t.value=''; if(pr){ const it={name:pr.name,desc:pr.desc||'',mode:pr.mode==='mensual'?'mensual':'unico',qty:1,price:qCur(Q)==='USD'?0:qBasePrice(pr,Q.size),pid:pr.id,pe:false};
+        const f0=Q.items.length===1&&!(Q.items[0].name||'').trim()&&!Q.items[0].price&&!(Q.items[0].desc||'').trim(); if(f0) Q.items[0]=it; else Q.items.push(it); paintQItems(); if(!it.price) toast(qCur(Q)==='USD'?'Ingrese el valor en dólares (los precios base del catálogo están en pesos).':'Este producto no tiene precio base para ese tamaño. Ingréselo en la cotización.'); } }
     if(t.id==='q-cli'){ const c=clientById(t.value); Q.clientId=t.value; if(c){ Q.cName=c.name||''; Q.cContact=c.contact||Q.cContact; $('#q-name').value=Q.cName; $('#q-contact').value=Q.cContact; } }
   });
   root.addEventListener('click',e=>{
@@ -305,7 +314,7 @@ async function saveQuote(q,andPdf){
   if(!(Q.cName||'').trim()){ toast('Indique el nombre del cliente.'); return false; }
   if(!items.length||items.some(i=>!i.name)){ toast('Cada servicio necesita un nombre.'); return false; }
   const num_=q?q.num:nextQNum(), now=new Date().toISOString();
-  const data={size:Q.size||'mediana',num:num_,date:Q.date||todayS(),valid:Number(Q.valid)||15,clientId:Q.clientId||'',cName:Q.cName.trim(),cNit:(Q.cNit||'').trim(),cContact:(Q.cContact||'').trim(),cEmail:(Q.cEmail||'').trim(),cPhone:(Q.cPhone||'').trim(),title:(Q.title||'').trim(),exec:Q.exec==='diego'?'diego':'laura',status:Q.status||'espera',notes:(Q.notes||'').trim(),items,createdAt:q?(q.createdAt||now):now,updatedAt:now};
+  const data={cur:Q.cur==='USD'?'USD':'COP',lang:Q.lang==='en'?'en':'es',size:Q.size||'mediana',num:num_,date:Q.date||todayS(),valid:Number(Q.valid)||15,clientId:Q.clientId||'',cName:Q.cName.trim(),cNit:(Q.cNit||'').trim(),cContact:(Q.cContact||'').trim(),cEmail:(Q.cEmail||'').trim(),cPhone:(Q.cPhone||'').trim(),title:(Q.title||'').trim(),exec:Q.exec==='diego'?'diego':'laura',status:Q.status||'espera',notes:(Q.notes||'').trim(),items,createdAt:q?(q.createdAt||now):now,updatedAt:now};
   const id=await saveDoc('quotes',q&&q.id,data);
   toast('Cotización N.º '+num_+' guardada');
   if(andPdf) await pdfQuote(Object.assign({id},data));
@@ -336,15 +345,17 @@ function loadJsPdf(){
 }
 const imgDims=src=>new Promise(res=>{ const i=new Image(); i.onload=()=>res({w:i.naturalWidth||820,h:i.naturalHeight||223}); i.onerror=()=>res({w:820,h:223}); i.src=src; });
 const pdfTxt=s=>String(s==null?'':s).replace(/ /g,' ').replace(/[‘’]/g,"'").replace(/[“”]/g,'"').replace(/[^\n\x20-\x7e\xa0-\xff–—•…€]/g,'');
-const pdfMoney=n=>'$ '+new Intl.NumberFormat('es-CO').format(Number(n)||0).replace(/ /g,' ');
-const longDate=s=>{ try{ return new Intl.DateTimeFormat('es-CO',{day:'numeric',month:'long',year:'numeric'}).format(parse(s)); }catch(e){ return s||''; } };
+const pdfMoney=(n,cur)=>cur==='USD'?'US$ '+USDN.format(Number(n)||0):'$ '+new Intl.NumberFormat('es-CO').format(Number(n)||0);
+const longDate=(s,lang)=>{ try{ return new Intl.DateTimeFormat(lang==='en'?'en-US':'es-CO',{day:'numeric',month:'long',year:'numeric'}).format(parse(s)); }catch(e){ return s||''; } };
+const PDFL={es:{quote:'COTIZACIÓN',no:'N.º ',quoteNo:'Cotización N.º ',prep:'Preparada para',det:'Detalles',tax:'NIT / C.C. ',attn:'Atención: ',date:'Fecha',valid:'Vigencia',by:'Elaborada por',days:' días (hasta ',svc:'SERVICIO',mod:'MODALIDAD',qty:'CANT.',unit:'VALOR UNIT.',sub:'SUBTOTAL',men:'Pago mensual',abo:'Abonos ',uni:'Pago único',mo:' /mes',tu:'Total pago único',tm:'Total mensual',pmo:' / mes',cop:'Valores en pesos colombianos (COP).',usd:'Valores en dólares estadounidenses (USD).',cond:'Condiciones y observaciones',reg:'Atentamente,',tel:'Tel. ',page:'Página ',of:' de ',file:'Cotizacion-'},
+ en:{quote:'QUOTE',no:'No. ',quoteNo:'Quote No. ',prep:'Prepared for',det:'Details',tax:'Tax ID ',attn:'Attn: ',date:'Date',valid:'Valid for',by:'Prepared by',days:' days (until ',svc:'SERVICE',mod:'PAYMENT TERMS',qty:'QTY',unit:'UNIT PRICE',sub:'SUBTOTAL',men:'Monthly payment',abo:'Installments ',uni:'One-time payment',mo:' /month',tu:'One-time total',tm:'Monthly total',pmo:' / month',cop:'Amounts in Colombian pesos (COP).',usd:'Amounts in US dollars (USD).',cond:'Terms and notes',reg:'Sincerely,',tel:'Tel. ',page:'Page ',of:' of ',file:'Quote-'}};
 async function pdfQuote(q){
   if(!q) return;
   let blob;
   try{ blob=await buildPdf(q); }
   catch(err){ console.error(err); toast('No se pudo generar el PDF. Revise su conexión e intente de nuevo.'); return; }
   const E=empData(), ex=E[q.exec==='diego'?'diego':'laura'];
-  const fname='Cotizacion-'+q.num+'-'+(pdfTxt(q.cName).normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^A-Za-z0-9]+/g,'-').replace(/^-|-$/g,'')||'cliente')+'.pdf';
+  const fname=PDFL[q.lang==='en'?'en':'es'].file+q.num+'-'+(pdfTxt(q.cName).normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^A-Za-z0-9]+/g,'-').replace(/^-|-$/g,'')||'cliente')+'.pdf';
   try{
     if(S.dl){ await S.dl.save({filename:fname,data:blob}); }
     else { const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=fname; document.body.appendChild(a); a.click(); setTimeout(()=>{ URL.revokeObjectURL(a.href); a.remove(); },4000); }
@@ -352,7 +363,7 @@ async function pdfQuote(q){
   }catch(err){ toast(err&&err.code==='declined'?'Descarga cancelada.':'No se pudo guardar el PDF.'); }
 }
 async function buildPdf(q){
-  const JsPDF=await loadJsPdf(), E=empData(), ex=E[q.exec==='diego'?'diego':'laura'], T=pdfTxt;
+  const JsPDF=await loadJsPdf(), E=empData(), ex=E[q.exec==='diego'?'diego':'laura'], T=pdfTxt, L=PDFL[q.lang==='en'?'en':'es'], CUR=qCur(q), LG=q.lang==='en'?'en':'es';
   const doc=new JsPDF({unit:'mm',format:'a4'}), W=210, H=297, M=14, R=W-M, LIM=H-22;
   const DARK=[26,20,18], GREEN=[126,211,33], GD=[62,142,15], GRAY=[100,100,96], INK=[30,26,24], LINE=[222,222,216];
   const lg=await imgDims(LOGO_H);
@@ -364,19 +375,19 @@ async function buildPdf(q){
     doc.setFillColor(...DARK); doc.rect(0,0,W,bh,'F');
     [[155,230,53],[109,194,26],[62,142,15]].forEach((c,i)=>{ doc.setFillColor(c[0],c[1],c[2]); doc.rect(i*W/3,bh,W/3+0.3,1.4,'F'); });
     const lh=first?24:11, lw=lh*lg.w/lg.h; doc.addImage(LOGO_H,'PNG',M,(bh-lh)/2,lw,lh);
-    if(first){ font('bolditalic',22,GREEN); doc.text('COTIZACIÓN',R,17,{align:'right'}); font('bold',12,[255,255,255]); doc.text('N.º '+q.num,R,25,{align:'right'}); font('normal',9,[190,190,184]); doc.text(T(longDate(q.date)),R,31,{align:'right'}); }
-    else { font('bolditalic',11,GREEN); doc.text('Cotización N.º '+q.num,R,12.5,{align:'right'}); }
+    if(first){ font('bolditalic',22,GREEN); doc.text(L.quote,R,17,{align:'right'}); font('bold',12,[255,255,255]); doc.text(L.no+q.num,R,25,{align:'right'}); font('normal',9,[190,190,184]); doc.text(T(longDate(q.date,LG)),R,31,{align:'right'}); }
+    else { font('bolditalic',11,GREEN); doc.text(L.quoteNo+q.num,R,12.5,{align:'right'}); }
     return first?52:30;
   }
   function label(t,x,y){ font('bold',7.5,GD); doc.text(T(t).toUpperCase(),x,y); }
   let y=band(true);
   // cliente / detalles
-  label('Preparada para',M,y); label('Detalles',124,y); y+=5.5;
+  label(L.prep,M,y); label(L.det,124,y); y+=5.5;
   let yl=y, yr=y;
   font('bold',12,INK); lines(q.cName,100).forEach(l=>{ doc.text(l,M,yl); yl+=5.4; });
   font('normal',9.5,INK);
-  [q.cNit&&('NIT / C.C. '+q.cNit),q.cContact&&('Atención: '+q.cContact),q.cEmail,q.cPhone].filter(Boolean).forEach(t=>{ lines(t,100).forEach(l=>{ doc.text(l,M,yl); yl+=4.8; }); });
+  [q.cNit&&(L.tax+q.cNit),q.cContact&&(L.attn+q.cContact),q.cEmail,q.cPhone].filter(Boolean).forEach(t=>{ lines(t,100).forEach(l=>{ doc.text(l,M,yl); yl+=4.8; }); });
   const until=(()=>{ try{ return ymd(new Date(parse(q.date).getTime()+((Number(q.valid)||15)*86400000))); }catch(e){ return ''; } })();
-  [['Fecha',longDate(q.date)],['Vigencia',(Number(q.valid)||15)+' días (hasta '+longDate(until)+')'],['Elaborada por',ex.name]].forEach(r=>{ font('bold',9,GRAY); doc.text(T(r[0])+':',124,yr); font('normal',9.5,INK); const ls=lines(r[1],R-124-29); ls.forEach((l,i)=>{ doc.text(l,124+29,yr+i*4.6); }); yr+=Math.max(1,ls.length)*4.6+1.2; });
+  [[L.date,longDate(q.date,LG)],[L.valid,(Number(q.valid)||15)+L.days+longDate(until,LG)+')'],[L.by,ex.name]].forEach(r=>{ font('bold',9,GRAY); doc.text(T(r[0])+':',124,yr); font('normal',9.5,INK); const ls=lines(r[1],R-124-29); ls.forEach((l,i)=>{ doc.text(l,124+29,yr+i*4.6); }); yr+=Math.max(1,ls.length)*4.6+1.2; });
   y=Math.max(yl,yr)+5;
   if(q.title){ font('bolditalic',13,INK); lines(q.title,R-M).forEach(l=>{ doc.text(l,M,y); y+=6; }); y+=1; }
