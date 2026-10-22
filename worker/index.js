@@ -1,7 +1,7 @@
 // Worker de D&L Hnos. Lozano: API sobre D1 (documentos y archivos), correo con Resend
 // y acceso con usuario y contraseña. La página estática la sirve ASSETS.
 
-const COLLS = new Set(['clients', 'tasks', 'payments', 'expenses', 'settings', 'quotes', 'products', 'contacts', 'campaigns']);
+const COLLS = new Set(['clients', 'tasks', 'payments', 'expenses', 'settings', 'quotes', 'products', 'contacts', 'campaigns', 'bills']);
 const MAX_DOC = 1_900_000;   // D1 admite ~2 MB por fila
 const MAX_FILE = 1_500_000;  // archivo binario antes de pasar a base64
 
