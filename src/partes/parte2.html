@@ -24,7 +24,7 @@ function draw(){
   if(S.err){ app.innerHTML=head()+'<div class="welcome"><h3>No se pudo abrir el tablero</h3><p>'+esc(S.err)+'</p></div>'; return; }
   if(!(S.loaded.c&&S.loaded.t&&S.loaded.p&&S.loaded.e&&S.loaded.s&&S.loaded.q&&S.loaded.r&&S.loaded.k&&S.loaded.g)){ app.innerHTML=head()+'<div class="empty">Cargando clientes…</div>'; return; }
   if(S.view==='client' && !clientById(S.cid)){ S.view='cli'; S.cid=null; }
-  app.innerHTML = S.view==='client' ? drawClient() : (S.view==='caja' ? drawCaja() : (S.view==='cot' ? drawCot() : (S.view==='prod' ? drawProd() : (S.view==='cli' ? drawClients() : (S.view==='pros' ? drawPros() : drawHome())))));
+  app.innerHTML = S.view==='client' ? drawClient() : (S.view==='caja' ? drawCaja() : (S.view==='cot' ? drawCot() : (S.view==='cobro' ? drawCobro() : (S.view==='prod' ? drawProd() : (S.view==='cli' ? drawClients() : (S.view==='pros' ? drawPros() : drawHome()))))));
 }
 function head(right){
   return '<header class="hero"><img class="hero-logo" src="'+LOGO_H+'" alt="D&amp;L Hnos. Lozano"><div class="hero-r">'+(right||'')+'</div></header>';
@@ -34,7 +34,7 @@ const ymOf = x => (x||'').slice(0,7);
 const monthLabel = ym => { const q=ym.split('-').map(Number); return monthName(q[0],q[1]); };
 function weekRange(){ const d=new Date(), off=(d.getDay()+6)%7; const a=new Date(d.getFullYear(),d.getMonth(),d.getDate()-off), z=new Date(a.getFullYear(),a.getMonth(),a.getDate()+6); return [ymd(a),ymd(z)]; }
 function dayLabel(diff,due){ if(diff<0) return 'Vencidas'; if(diff===0) return 'Hoy'; if(diff===1) return 'Mañana'; const t=new Intl.DateTimeFormat('es-CO',{weekday:'long',day:'numeric',month:'short'}).format(parse(due)).replace(/\./g,''); return t.charAt(0).toUpperCase()+t.slice(1); }
-function navTabs(){ const tb=(v,l)=>'<button class="tab" role="tab" aria-selected="'+(S.view===v)+'" data-act="nav" data-v="'+v+'" type="button">'+l+'</button>'; return '<div class="tabs" role="tablist">'+tb('home','Panel general')+tb('cli','Clientes')+tb('caja','Flujo de caja')+tb('pros','Prospección')+tb('cot','Cotizaciones')+tb('prod','Productos')+'</div>'; }
+function navTabs(){ const tb=(v,l)=>'<button class="tab" role="tab" aria-selected="'+(S.view===v)+'" data-act="nav" data-v="'+v+'" type="button">'+l+'</button>'; return '<div class="tabs" role="tablist">'+tb('home','Panel general')+tb('cli','Clientes')+tb('caja','Flujo de caja')+tb('pros','Prospección')+tb('cot','Cotizaciones')+tb('cobro','Cuentas de cobro')+tb('prod','Productos')+'</div>'; }
 
 function drawHome(){
   const t=todayS(), cm=t.slice(0,7);
