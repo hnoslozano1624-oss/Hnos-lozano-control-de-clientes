@@ -218,7 +218,7 @@ const nextQNum=()=>Math.max(99,...S.quotes.map(q=>Number(q.num)||0))+1;
 const qTotals=q=>{ let u=0,m=0; (q.items||[]).forEach(i=>{ const v=(Number(i.price)||0)*(Number(i.qty)||1); if(i.mode==='mensual') m+=v; else u+=v; }); return {u,m}; };
 function empData(){
   const e=S.empresa||{}; const ex=(k,n)=>Object.assign({name:n,cargo:'',phone:'',email:''},e[k]||{});
-  return {nombre:e.nombre||'D&L Hnos. Lozano',nit:e.nit||'',dir:e.dir||'',web:e.web||'',tel:e.tel||'',email:e.email||'',wa:e.wa||'',waText:e.waText!=null?e.waText:'Hola, vi su correo de D&L Hnos. Lozano y quiero más información.',laura:ex('laura','Laura Robayo'),diego:ex('diego','Diego Robayo')};
+  return {nombre:e.nombre||'D&L Hnos. Lozano',nit:e.nit||'',dir:e.dir||'',web:e.web||'',tel:e.tel||'',email:e.email||'',wa:e.wa||'',waText:e.waText!=null?e.waText:'Hola, vi su correo de D&L Hnos. Lozano y quiero más información.',laura:ex('laura','Laura Robayo'),diego:ex('diego','Diego Robayo'),cbNombre:e.cbNombre||'D&L Hnos Lozano',cbFirma:e.cbFirma||'Laura Marcela Robayo',cbCc:e.cbCc!=null?e.cbCc:'1013595577',banco:e.banco||'',tipoCta:e.tipoCta||'',numCta:e.numCta||'',titCta:e.titCta||'',pagoExtra:e.pagoExtra||'',cbLey:e.cbLey!=null?e.cbLey:'Persona natural no responsable de IVA.'};
 }
 function drawCot(){
   const qs=S.quotes.slice().sort((a,b)=>(b.num||0)-(a.num||0));
@@ -330,11 +330,255 @@ function companyForm(){
     +'<div class="f2">'+fl('cp-dir','Dirección y ciudad',E.dir)+fl('cp-web','Sitio web',E.web,'hermanoslozano.com')+'</div>'
     +'<div class="f2">'+fl('cp-tel','Teléfono de la empresa',E.tel)+fl('cp-email','Correo de la empresa',E.email,'','email')+'</div>'
     +'<div class="f2">'+fl('cp-wa','WhatsApp corporativo (botón de los correos)',E.wa,'Ej. 300 123 4567')+fl('cp-watext','Mensaje que llega al WhatsApp al dar clic',E.waText)+'</div>'
-    +'<hr class="hr">'+ex('laura','Ejecutiva: Laura')+'<hr class="hr">'+ex('diego','Ejecutivo: Diego'),
+    +'<hr class="hr">'+ex('laura','Ejecutiva: Laura')+'<hr class="hr">'+ex('diego','Ejecutivo: Diego')
+    +'<hr class="hr"><div class="fld"><span class="lab">Cuenta de cobro</span><span class="hint">Datos que se imprimen en el PDF de las cuentas de cobro.</span></div>'
+    +'<div class="f3">'+fl('cp-cbnombre','A nombre de',E.cbNombre)+fl('cp-cbfirma','Persona que firma',E.cbFirma)+fl('cp-cbcc','Cédula (C.C.)',E.cbCc)+'</div>'
+    +'<div class="f3">'+fl('cp-banco','Banco',E.banco,'Ej. Bancolombia')+fl('cp-tipocta','Tipo de cuenta',E.tipoCta,'Ej. Ahorros')+fl('cp-numcta','N.º de cuenta',E.numCta)+'</div>'
+    +'<div class="f2">'+fl('cp-titcta','Titular de la cuenta',E.titCta)+fl('cp-pagoextra','Otro medio de pago (Nequi, Daviplata, llave…)',E.pagoExtra)+'</div>'
+    +fl('cp-cbley','Leyenda tributaria (déjela vacía si no aplica)',E.cbLey),
    actions:[{label:'Cancelar',fn:()=>true},{label:'Guardar',kind:'pri',fn:async()=>{
      const v=id=>($('#'+id).value||'').trim(), ex=k=>({name:v('cp-'+k+'-name'),cargo:v('cp-'+k+'-cargo'),phone:v('cp-'+k+'-phone'),email:v('cp-'+k+'-email')});
-     await S.db.collection('settings').doc('empresa').set({nombre:v('cp-nombre'),nit:v('cp-nit'),dir:v('cp-dir'),web:v('cp-web'),tel:v('cp-tel'),email:v('cp-email'),wa:v('cp-wa'),waText:v('cp-watext'),laura:ex('laura'),diego:ex('diego')});
+     await S.db.collection('settings').doc('empresa').set({nombre:v('cp-nombre'),nit:v('cp-nit'),dir:v('cp-dir'),web:v('cp-web'),tel:v('cp-tel'),email:v('cp-email'),wa:v('cp-wa'),waText:v('cp-watext'),laura:ex('laura'),diego:ex('diego'),cbNombre:v('cp-cbnombre'),cbFirma:v('cp-cbfirma'),cbCc:v('cp-cbcc'),banco:v('cp-banco'),tipoCta:v('cp-tipocta'),numCta:v('cp-numcta'),titCta:v('cp-titcta'),pagoExtra:v('cp-pagoextra'),cbLey:v('cp-cbley')});
      toast('Datos guardados'); }}]});
+}
+
+/* ───────── cuentas de cobro ───────── */
+const BILL_ST={pendiente:['Pendiente','warn'],pagada:['Pagada','ok']};
+S.bills=S.bills||[];
+const billNo=n=>'CC-'+String(n).padStart(3,'0');
+const nextBillN=()=>Math.max(0,...S.bills.map(b=>Number(b.n)||0))+1;
+const billTotal=b=>sum(b.items||[],i=>(Number(i.price)||0)*(Number(i.qty)||1));
+function billsSub(){
+  if(S.billsSub||!S.db) return; S.billsSub=true;
+  S.db.collection('bills').onSnapshot(snap=>{ S.bills=snap.docs.map(d=>Object.assign({id:d.id},d.data())); S.billsErr=''; render(); },e=>{ S.billsErr=(e&&e.message)||'No se pudo cargar'; render(); });
+}
+/* valor en letras (pesos colombianos) */
+function numLetras(n){
+  n=Math.floor(Number(n)||0); if(n<=0) return 'cero';
+  const U=['','uno','dos','tres','cuatro','cinco','seis','siete','ocho','nueve','diez','once','doce','trece','catorce','quince','dieciséis','diecisiete','dieciocho','diecinueve','veinte','veintiuno','veintidós','veintitrés','veinticuatro','veinticinco','veintiséis','veintisiete','veintiocho','veintinueve'];
+  const De=['','','','treinta','cuarenta','cincuenta','sesenta','setenta','ochenta','noventa'];
+  const Ce=['','ciento','doscientos','trescientos','cuatrocientos','quinientos','seiscientos','setecientos','ochocientos','novecientos'];
+  const b99=x=>x<30?U[x]:De[Math.floor(x/10)]+(x%10?' y '+U[x%10]:'');
+  const b999=x=>{ if(x===100) return 'cien'; const c=Math.floor(x/100), r=x%100; return (Ce[c]+(c&&r?' ':'')+(r?b99(r):'')).trim(); };
+  const apo=t=>t.replace(/veintiuno$/,'veintiún').replace(/uno$/,'un');
+  if(n<1000) return b999(n);
+  if(n<1e6){ const m=Math.floor(n/1000), r=n%1000; return (m===1?'mil':apo(b999(m))+' mil')+(r?' '+b999(r):''); }
+  const m=Math.floor(n/1e6), r=n%1e6;
+  return (m===1?'un millón':apo(numLetras(m))+' millones')+(r?' '+numLetras(r):'');
+}
+const pesosLetras=n=>{ n=Math.floor(Number(n)||0); if(n===1) return 'Un peso M/CTE'; let t=numLetras(n); const mm=n>=1e6&&n%1e6===0; if(!mm) t=t.replace(/veintiuno$/,'veintiún').replace(/uno$/,'un'); return t.charAt(0).toUpperCase()+t.slice(1)+(mm?' de pesos':' pesos')+' M/CTE'; };
+
+function drawCobro(){
+  billsSub();
+  const bs=S.bills.slice().sort((a,b)=>(b.n||0)-(a.n||0));
+  const pend=bs.filter(b=>b.status!=='pagada'), paid=bs.filter(b=>b.status==='pagada');
+  let h=head('<button class="btn pri" data-act="cc-new" type="button">+ Nueva cuenta de cobro</button>');
+  h+='<div style="margin-bottom:6px"><h1>Cuentas de cobro</h1><div class="hint" style="margin-top:4px">Cree la cuenta de cobro para un cliente, descárguela en PDF con el membrete de D&amp;L y envíela.</div></div>'+navTabs();
+  if(S.billsErr) h+='<div class="hint sum-bad" style="margin-bottom:10px">No se pudieron cargar las cuentas de cobro ('+esc(S.billsErr)+'). Recargue la página en unos minutos.</div>';
+  h+='<section class="stats" aria-label="Cuentas de cobro">'
+   +stat('Cuentas de cobro',String(bs.length),'Próximo consecutivo '+billNo(nextBillN()),'')
+   +stat('Pendientes de pago',String(pend.length),'Por cobrar '+money(sum(pend,billTotal)),pend.length?'hot':'')
+   +stat('Pagadas',String(paid.length),'Cobrado '+money(sum(paid,billTotal)),'good')
+   +'</section>';
+  h+='<div class="toolbar"><h2>Historial</h2><button class="btn sm" data-act="company" type="button">Datos de D&amp;L para el PDF</button></div>';
+  if(!bs.length) return h+'<div class="welcome"><h3>Aún no hay cuentas de cobro</h3><p>Cree la primera: elija el cliente (se traen sus datos), seleccione los servicios, indique cantidad y valor, y descargue el PDF. El consecutivo empieza en CC-001.</p><button class="btn pri" data-act="cc-new" type="button">Crear cuenta de cobro</button></div>';
+  h+='<div class="tbl-wrap"><table><thead><tr><th>N.º</th><th>Fecha</th><th>Cliente</th><th>Conceptos</th><th>Total</th><th>Estado</th><th></th></tr></thead><tbody>';
+  bs.forEach(b=>{ const st=BILL_ST[b.status==='pagada'?'pagada':'pendiente'], names=(b.items||[]).map(i=>i.name).filter(Boolean);
+    h+='<tr><td class="num" style="font-weight:800">'+esc(b.num||billNo(b.n||0))+'</td><td>'+esc(fmtD(b.date))+'</td><td style="font-weight:600">'+esc(b.cName||'—')+'</td><td class="hint" style="max-width:260px">'+esc(names.join(' · ')||'—')+'</td><td class="num">'+esc(money(billTotal(b)))+'</td><td><span class="pill '+st[1]+'">'+st[0]+'</span></td>'
+     +'<td style="white-space:nowrap"><button class="btn sm pri" data-act="cc-pdf" data-id="'+esc(b.id)+'" type="button">PDF</button> <button class="btn sm" data-act="cc-mail" data-id="'+esc(b.id)+'" type="button" title="Descarga el PDF y abre un correo listo para adjuntarlo">Enviar</button> '+(b.status==='pagada'?'':'<button class="btn sm" data-act="cc-paid" data-id="'+esc(b.id)+'" type="button">Marcar pagada</button> ')+'<button class="btn sm" data-act="cc-edit" data-id="'+esc(b.id)+'" type="button">Editar</button></td></tr>'; });
+  return h+'</tbody></table></div>';
+}
+document.addEventListener('click',e=>{
+  const el=e.target.closest('[data-act^="cc-"]'); if(!el||!$('#app').contains(el)) return;
+  const a=el.dataset.act, b=S.bills.find(x=>x.id===el.dataset.id);
+  if(a==='cc-new') billForm(null);
+  else if(a==='cc-edit'&&b) billForm(b);
+  else if(a==='cc-pdf'&&b) pdfBill(b);
+  else if(a==='cc-mail'&&b) mailBill(b);
+  else if(a==='cc-paid'&&b) patchDoc('bills',b.id,{status:'pagada',paidAt:todayS()}).then(()=>toast('Cuenta '+(b.num||'')+' marcada como pagada')).catch(fail);
+});
+function billClientInfo(c){
+  const nm=(c.name||'').trim().toLowerCase();
+  const bl=S.bills.filter(b=>b.clientId===c.id).sort((a,b)=>(b.n||0)-(a.n||0))[0];
+  const q=S.quotes.filter(x=>x.clientId===c.id||(x.cName||'').trim().toLowerCase()===nm).sort((a,b)=>(b.num||0)-(a.num||0))[0];
+  const pick=k=>(bl&&bl[k])||(q&&q[k])||'';
+  return {clientId:c.id,cName:c.name||'',cContact:c.contact||pick('cContact'),cNit:pick('cNit'),cEmail:pick('cEmail'),cPhone:pick('cPhone'),cAddr:pick('cAddr')};
+}
+let BF=null;
+const billItem=()=>({sel:'',name:'',detail:'',qty:1,price:0});
+function billConceptOpts(it){
+  const c=BF.clientId&&clientById(BF.clientId);
+  const sv=c?(c.services||[]).filter(k=>SERVICES[k]&&k!=='otro'):[];
+  const pr=S.prods.slice().sort((a,b)=>(a.name||'').localeCompare(b.name||'','es'));
+  let h='<option value="">Elegir servicio…</option>';
+  if(sv.length) h+='<optgroup label="Servicios del cliente">'+sv.map(k=>'<option value="svc:'+k+'"'+(it.sel==='svc:'+k?' selected':'')+'>'+esc(SERVICES[k].label)+'</option>').join('')+'</optgroup>';
+  if(pr.length) h+='<optgroup label="Catálogo de productos">'+pr.map(p=>'<option value="prod:'+esc(p.id)+'"'+(it.sel==='prod:'+p.id?' selected':'')+'>'+esc(p.name)+'</option>').join('')+'</optgroup>';
+  return h+'<option value="otro"'+(it.sel==='otro'?' selected':'')+'>Otro (escribir)</option>';
+}
+function paintBillItems(){
+  $('#b-items').innerHTML=BF.items.map((it,i)=>'<div class="qitem"><div class="qhead">'
+   +'<div class="fld"><label for="bi-s'+i+'">Servicio '+(i+1)+'</label><select class="inp" id="bi-s'+i+'" data-bi="1" data-f="sel" data-i="'+i+'">'+billConceptOpts(it)+'</select></div>'
+   +'<div class="fld q-n"><label for="bi-n'+i+'">Concepto</label><input class="inp" id="bi-n'+i+'" data-bi="1" data-f="name" data-i="'+i+'" placeholder="Se llena al elegir el servicio o escríbalo" value="'+esc(it.name)+'"></div>'
+   +'<div class="fld"><label for="bi-q'+i+'">Cant.</label><input class="inp num" id="bi-q'+i+'" inputmode="numeric" data-bi="1" data-f="qty" data-i="'+i+'" value="'+esc(it.qty)+'"></div>'
+   +'<div class="fld"><label for="bi-p'+i+'">Valor unitario (COP)</label><input class="inp num" id="bi-p'+i+'" inputmode="numeric" data-bi="1" data-f="price" data-i="'+i+'" value="'+esc(grp(it.price))+'"></div>'
+   +'<div class="fld"><span class="lab">Total</span><b class="num" id="bi-t'+i+'" style="padding:10px 0">'+esc(money((Number(it.price)||0)*(Number(it.qty)||1)))+'</b></div>'
+   +'<button class="x" type="button" data-m="b-del" data-i="'+i+'" aria-label="Quitar servicio '+(i+1)+'">×</button></div>'
+   +'<div class="fld"><label for="bi-d'+i+'">Detalle adicional (opcional)</label><textarea class="inp" id="bi-d'+i+'" rows="2" data-bi="1" data-f="detail" data-i="'+i+'" placeholder="Si se requiere, escriba aquí una descripción o aclaración de este servicio">'+esc(it.detail)+'</textarea></div></div>').join('');
+  updateBillTot();
+}
+function updateBillTot(){
+  const t=sum(BF.items,i=>(Number(i.price)||0)*(Number(i.qty)||1)), el=$('#b-tot'); if(!el) return;
+  el.innerHTML=t?'<span>Total a cobrar <b>'+esc(money(t))+'</b></span><span class="hint">'+esc(pesosLetras(t))+'</span>':'<span class="hint">Ingrese cantidad y valor de cada servicio.</span>';
+}
+function billForm(b){
+  const editing=!!b;
+  BF=Object.assign({date:todayS(),clientId:'',cName:'',cNit:'',cContact:'',cEmail:'',cPhone:'',cAddr:'',notes:'',status:'pendiente',items:[billItem()]},editing?JSON.parse(JSON.stringify(b)):{});
+  if(!BF.items||!BF.items.length) BF.items=[billItem()];
+  const cls=S.clients.slice().sort((a,c)=>(a.status==='cerrado')-(c.status==='cerrado')||(a.name||'').localeCompare(c.name||'','es'));
+  const fl=(id,l,k,ph,type)=>'<div class="fld"><label for="'+id+'">'+l+'</label><input class="inp" id="'+id+'" '+(type?'type="'+type+'" ':'')+'data-b="'+k+'" value="'+esc(BF[k])+'" placeholder="'+esc(ph||'')+'"></div>';
+  const body='<div class="fld" style="max-width:260px"><label for="b-date">Fecha de la cuenta de cobro</label><input class="inp" id="b-date" type="date" data-b="date" value="'+esc(BF.date)+'"></div>'
+   +'<hr class="hr"><div class="fld"><label for="b-cli">Cliente</label><select class="inp" id="b-cli"><option value="">Otro cliente (escribir los datos)</option>'+cls.map(c=>'<option value="'+esc(c.id)+'"'+(BF.clientId===c.id?' selected':'')+'>'+esc(c.name)+(c.status==='cerrado'?' (cerrado)':'')+'</option>').join('')+'</select><span class="hint">Al elegir un cliente se traen sus datos guardados (nombre, contacto y, si existen, los de sus cotizaciones). Complete a mano lo que falte.</span></div>'
+   +'<div class="f2">'+fl('b-name','Nombre o razón social','cName','Nombre de la empresa o persona')+fl('b-nit','NIT o cédula','cNit')+'</div>'
+   +'<div class="f3">'+fl('b-contact','Persona de contacto','cContact')+fl('b-email','Correo','cEmail','','email')+fl('b-phone','Teléfono','cPhone')+'</div>'
+   +fl('b-addr','Dirección y ciudad (opcional)','cAddr')
+   +'<hr class="hr"><div class="fld"><span class="lab">Servicios a cobrar</span><span class="hint">Despliegue la lista para elegir un servicio del cliente o del catálogo, o elija «Otro» y escríbalo. Cada línea lleva cantidad, valor y un detalle opcional.</span><div id="b-items" style="display:flex;flex-direction:column;gap:10px;margin-top:6px"></div><div class="qpick"><button class="btn sm" type="button" data-m="b-add">+ Agregar servicio</button></div><div class="qtot" id="b-tot"></div></div>'
+   +'<div class="fld"><label for="b-notes">Observaciones (opcional)</label><textarea class="inp" id="b-notes" data-b="notes" placeholder="Condiciones de pago, fecha límite, aclaraciones…">'+esc(BF.notes)+'</textarea></div>'
+   +(editing?'<div class="fld" style="max-width:260px"><label for="b-status">Estado</label><select class="inp" id="b-status" data-b="status"><option value="pendiente"'+(BF.status!=='pagada'?' selected':'')+'>Pendiente</option><option value="pagada"'+(BF.status==='pagada'?' selected':'')+'>Pagada</option></select></div>':'');
+  const actions=[{label:'Cancelar',fn:()=>true}];
+  if(editing) actions.push({label:'Eliminar',kind:'danger',keep:true,fn:x=>{ if(!x.dataset.armed){ x.dataset.armed='1'; x.classList.add('armed'); x.textContent='¿Confirmar eliminación?'; return; } delDoc('bills',b.id).then(()=>{ closeModal(); toast('Cuenta de cobro eliminada'); }).catch(fail); }});
+  actions.push({label:'Guardar',fn:()=>saveBill(b,false)});
+  actions.push({label:'Guardar y descargar PDF',kind:'pri',fn:()=>saveBill(b,true)});
+  openModal({title:editing?'Cuenta de cobro '+(b.num||billNo(b.n||0)):'Nueva cuenta de cobro '+billNo(nextBillN()),wide:true,body,actions,onMount:root=>{ paintBillItems(); bindBill(root); }});
+}
+function bindBill(root){
+  root.addEventListener('input',e=>{
+    const t=e.target;
+    if(t.dataset.b){ BF[t.dataset.b]=t.value; return; }
+    if(t.dataset.bi){ const i=Number(t.dataset.i), it=BF.items[i], f=t.dataset.f; if(!it) return;
+      if(f==='price') it.price=num(t.value); else if(f==='qty') it.qty=num(t.value)||1; else if(f==='sel') return; else it[f]=t.value;
+      const tt=$('#bi-t'+i); if(tt) tt.textContent=money((Number(it.price)||0)*(Number(it.qty)||1)); updateBillTot(); }
+  });
+  root.addEventListener('change',e=>{
+    const t=e.target;
+    if(t.dataset.f==='price') t.value=grp(num(t.value));
+    if(t.id==='b-cli'){ const c=clientById(t.value);
+      if(c){ Object.assign(BF,billClientInfo(c)); ['cName:b-name','cNit:b-nit','cContact:b-contact','cEmail:b-email','cPhone:b-phone','cAddr:b-addr'].forEach(p=>{ const q=p.split(':'), el=$('#'+q[1]); if(el) el.value=BF[q[0]]||''; }); } else BF.clientId='';
+      paintBillItems(); }
+    if(t.dataset.bi&&t.dataset.f==='sel'){ const it=BF.items[Number(t.dataset.i)]; if(!it) return; it.sel=t.value;
+      if(t.value.startsWith('svc:')){ it.name=(SERVICES[t.value.slice(4)]||{}).label||''; }
+      else if(t.value.startsWith('prod:')){ const p=S.prods.find(x=>x.id===t.value.slice(5)); if(p){ it.name=p.name; if(!it.detail) it.detail=p.desc||''; } }
+      else if(t.value==='otro'){ it.name=''; }
+      paintBillItems(); if(t.value==='otro'){ const el=$('#bi-n'+t.dataset.i); el&&el.focus(); } }
+  });
+  root.addEventListener('click',e=>{
+    const x=e.target.closest('[data-m]'); if(!x||x.closest('#m-foot')) return;
+    const m=x.dataset.m, i=Number(x.dataset.i);
+    if(m==='b-add'){ BF.items.push(billItem()); paintBillItems(); }
+    else if(m==='b-del'){ BF.items.splice(i,1); if(!BF.items.length) BF.items.push(billItem()); paintBillItems(); }
+  });
+}
+async function saveBill(b,andPdf){
+  const items=BF.items.filter(i=>(i.name||'').trim()||i.price).map(i=>({name:(i.name||'').trim(),detail:(i.detail||'').trim(),qty:Number(i.qty)||1,price:Number(i.price)||0}));
+  if(!(BF.cName||'').trim()){ toast('Indique el nombre del cliente.'); return false; }
+  if(!items.length||items.some(i=>!i.name)){ toast('Cada servicio necesita un concepto.'); return false; }
+  if(items.some(i=>!i.price)){ toast('Cada servicio necesita su valor.'); return false; }
+  const n=b?b.n:nextBillN(), now=new Date().toISOString();
+  const data={n,num:billNo(n),date:BF.date||todayS(),clientId:BF.clientId||'',cName:BF.cName.trim(),cNit:(BF.cNit||'').trim(),cContact:(BF.cContact||'').trim(),cEmail:(BF.cEmail||'').trim(),cPhone:(BF.cPhone||'').trim(),cAddr:(BF.cAddr||'').trim(),items,notes:(BF.notes||'').trim(),status:BF.status==='pagada'?'pagada':'pendiente',createdAt:b?(b.createdAt||now):now,updatedAt:now};
+  if(b&&b.paidAt) data.paidAt=b.paidAt;
+  const id=await saveDoc('bills',b&&b.id,data);
+  toast('Cuenta de cobro '+data.num+' guardada');
+  if(andPdf) await pdfBill(Object.assign({id},data));
+}
+async function pdfBill(b){
+  let blob;
+  try{ blob=await buildBillPdf(b); }
+  catch(err){ console.error(err); toast('No se pudo generar el PDF. Revise su conexión e intente de nuevo.'); return false; }
+  const fname='Cuenta-de-cobro-'+(b.num||billNo(b.n||0))+'-'+(pdfTxt(b.cName).normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^A-Za-z0-9]+/g,'-').replace(/^-|-$/g,'')||'cliente')+'.pdf';
+  try{
+    if(S.dl){ await S.dl.save({filename:fname,data:blob}); }
+    else { const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=fname; document.body.appendChild(a); a.click(); setTimeout(()=>{ URL.revokeObjectURL(a.href); a.remove(); },4000); }
+    toast('PDF de la cuenta de cobro '+(b.num||'')+' listo.'); return true;
+  }catch(err){ toast(err&&err.code==='declined'?'Descarga cancelada.':'No se pudo guardar el PDF.'); return false; }
+}
+async function mailBill(b){
+  const E=empData(), ok=await pdfBill(b); if(!ok) return;
+  const subj='Cuenta de cobro '+(b.num||'')+' - '+E.cbNombre;
+  const body='Estimado(a) '+(b.cContact||b.cName||'cliente')+',\n\nAdjunto la cuenta de cobro '+(b.num||'')+' por valor de '+money(billTotal(b))+', correspondiente a los servicios prestados por '+E.cbNombre+'.\n\nQuedamos atentos a cualquier inquietud.\n\nCordialmente,\n'+E.cbFirma+'\n'+E.cbNombre;
+  window.location.href='mailto:'+encodeURIComponent(b.cEmail||'')+'?subject='+encodeURIComponent(subj)+'&body='+encodeURIComponent(body);
+  toast('Se abrió el correo: adjunte el PDF que se acaba de descargar.');
+}
+async function buildBillPdf(b){
+  const JsPDF=await loadJsPdf(), E=empData(), T=pdfTxt;
+  const doc=new JsPDF({unit:'mm',format:'a4'}), W=210, H=297, M=14, R=W-M, LIM=H-22;
+  const DARK=[26,20,18], GREEN=[126,211,33], GD=[62,142,15], GRAY=[100,100,96], INK=[30,26,24], LINE=[222,222,216];
+  const lg=await imgDims(LOGO_H);
+  const col=c=>doc.setTextColor(c[0],c[1],c[2]);
+  const font=(st,sz,c)=>{ doc.setFont('helvetica',st); doc.setFontSize(sz); col(c||INK); };
+  const lines=(t,w)=>doc.splitTextToSize(T(t),w);
+  const NO=b.num||billNo(b.n||0), total=billTotal(b);
+  function band(first){
+    const bh=first?40:20;
+    doc.setFillColor(...DARK); doc.rect(0,0,W,bh,'F');
+    [[155,230,53],[109,194,26],[62,142,15]].forEach((c,i)=>{ doc.setFillColor(c[0],c[1],c[2]); doc.rect(i*W/3,bh,W/3+0.3,1.4,'F'); });
+    const lh=first?24:11, lw=lh*lg.w/lg.h; doc.addImage(LOGO_H,'PNG',M,(bh-lh)/2,lw,lh);
+    if(first){ font('bolditalic',19,GREEN); doc.text('CUENTA DE COBRO',R,15,{align:'right'}); font('bold',12,[255,255,255]); doc.text('N.º '+NO,R,23,{align:'right'}); font('bold',11,[255,255,255]); doc.text(T(longDate(b.date,'es')),R,31,{align:'right'}); }
+    else { font('bolditalic',11,GREEN); doc.text('Cuenta de cobro '+NO,R,12.5,{align:'right'}); }
+    return first?52:30;
+  }
+  function label(t,x,y){ font('bold',7.5,GD); doc.text(T(t).toUpperCase(),x,y); }
+  let y=band(true);
+  const need=h=>{ if(y+h>LIM){ doc.addPage(); y=band(false)+4; } };
+  label('Cobrar a',M,y); label('A favor de',124,y); y+=5.5;
+  let yl=y, yr=y;
+  font('bold',12,INK); lines(b.cName,100).forEach(l=>{ doc.text(l,M,yl); yl+=5.4; });
+  font('normal',9.5,INK);
+  [b.cNit&&('NIT / C.C. '+b.cNit),b.cContact&&('Atención: '+b.cContact),b.cAddr,b.cEmail,b.cPhone].filter(Boolean).forEach(t=>{ lines(t,100).forEach(l=>{ doc.text(l,M,yl); yl+=4.8; }); });
+  font('bold',11,INK); lines(E.cbNombre,R-124).forEach(l=>{ doc.text(l,124,yr); yr+=5.2; });
+  font('normal',9.5,INK);
+  [E.cbFirma,E.cbCc&&('C.C. '+E.cbCc),(E.laura.phone||E.tel)&&('Tel. '+(E.laura.phone||E.tel)),E.laura.email||E.email].filter(Boolean).forEach(t=>{ lines(t,R-124).forEach(l=>{ doc.text(l,124,yr); yr+=4.8; }); });
+  y=Math.max(yl,yr)+6;
+  // valor
+  doc.setFillColor(...DARK); doc.roundedRect(M,y,R-M,14,1.5,1.5,'F');
+  font('normal',9,[210,210,204]); doc.text('Valor de la cuenta de cobro',M+4,y+8.6);
+  font('bold',15,GREEN); doc.text(pdfMoney(total,'COP'),R-4,y+9.4,{align:'right'}); y+=20;
+  font('normal',9.5,INK);
+  lines('La suma de '+pesosLetras(total).toUpperCase()+', por concepto de:',R-M).forEach(l=>{ doc.text(l,M,y); y+=4.8; }); y+=3;
+  // tabla
+  const CX={svc:M+3,qty:136,unit:162,sub:R-3}, SW=108;
+  function thead(){ doc.setFillColor(...DARK); doc.rect(M,y,R-M,8,'F'); font('bold',7.5,[255,255,255]); doc.text('CONCEPTO',CX.svc,y+5.2); doc.text('CANT.',CX.qty,y+5.2,{align:'right'}); doc.text('VALOR UNIT.',CX.unit,y+5.2,{align:'right'}); doc.text('TOTAL',CX.sub,y+5.2,{align:'right'}); y+=8; }
+  thead();
+  (b.items||[]).forEach(it=>{
+    if(y+20>LIM){ doc.addPage(); y=band(false); thead(); }
+    const y0=y; y+=5.5;
+    font('normal',8.5,INK); doc.text(String(Number(it.qty)||1),CX.qty,y0+5.5,{align:'right'}); doc.text(pdfMoney(it.price,'COP'),CX.unit,y0+5.5,{align:'right'});
+    font('bold',9,INK); doc.text(pdfMoney((Number(it.price)||0)*(Number(it.qty)||1),'COP'),CX.sub,y0+5.5,{align:'right'});
+    font('bold',9.5,INK); lines(it.name,SW).forEach(l=>{ doc.text(l,CX.svc,y); y+=4.6; });
+    if(it.detail){ font('normal',8.5,GRAY); lines(it.detail,SW).forEach(l=>{ if(y>LIM){ doc.addPage(); y=band(false)+4; font('normal',8.5,GRAY); } doc.text(l,CX.svc,y); y+=4; }); }
+    y+=2.5; doc.setDrawColor(...LINE); doc.setLineWidth(0.2); doc.line(M,y,R,y);
+  });
+  y+=5; need(24);
+  doc.setFillColor(...DARK); doc.roundedRect(112,y,R-112,10,1.5,1.5,'F'); font('normal',9,[210,210,204]); doc.text('Total a pagar',116,y+6.4); font('bold',12,GREEN); doc.text(pdfMoney(total,'COP'),R-4,y+6.8,{align:'right'}); y+=16;
+  if(b.notes){ need(20); label('Observaciones',M,y); y+=5; font('normal',9,INK); lines(b.notes,R-M).forEach(l=>{ if(y>LIM){ doc.addPage(); y=band(false)+4; font('normal',9,INK); } doc.text(l,M,y); y+=4.5; }); y+=3; }
+  const pago=[E.banco&&('Banco: '+E.banco+(E.tipoCta?' · '+E.tipoCta:'')),E.numCta&&('N.º de cuenta: '+E.numCta),E.titCta&&('Titular: '+E.titCta),E.pagoExtra].filter(Boolean);
+  if(pago.length){ need(10+pago.length*5); label('Datos para el pago',M,y); y+=5; font('normal',9.5,INK); pago.forEach(t=>{ lines(t,R-M).forEach(l=>{ doc.text(l,M,y); y+=4.8; }); }); y+=3; }
+  if(E.cbLey){ need(10); font('italic',8.5,GRAY); lines(E.cbLey,R-M).forEach(l=>{ doc.text(l,M,y); y+=4.2; }); y+=2; }
+  need(34);
+  doc.setFillColor(...GREEN); doc.rect(M,y,22,1,'F'); y+=7;
+  font('normal',9.5,GRAY); doc.text('Atentamente,',M,y); y+=7;
+  font('bolditalic',12,INK); doc.text(T(E.cbFirma),M,y); y+=5.2;
+  font('normal',9.5,INK);
+  [E.cbCc&&('C.C. '+E.cbCc),E.cbNombre].filter(Boolean).forEach(l=>{ doc.text(T(l),M,y); y+=4.7; });
+  const n=doc.getNumberOfPages();
+  for(let i=1;i<=n;i++){
+    doc.setPage(i);
+    doc.setFillColor(...DARK); doc.rect(0,H-13,W,13,'F');
+    [[155,230,53],[109,194,26],[62,142,15]].forEach((c,k)=>{ doc.setFillColor(c[0],c[1],c[2]); doc.rect(k*W/3,H-14.2,W/3+0.3,1.2,'F'); });
+    font('normal',7.5,[200,200,194]);
+    const info=[E.nombre,E.nit&&('NIT '+E.nit),E.dir,E.web,E.tel&&('Tel. '+E.tel),E.email].filter(Boolean).join('  ·  ');
+    doc.text(T(info),W/2,H-7.2,{align:'center',maxWidth:W-2*M});
+    font('normal',7,[150,150,144]); doc.text('Página '+i+' de '+n,W/2,H-3.4,{align:'center'});
+  }
+  return doc.output('blob');
 }
 
 /* ── PDF ── */
