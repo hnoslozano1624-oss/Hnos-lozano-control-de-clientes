@@ -242,7 +242,22 @@ function newDraft(){
     monthly:0,billDay:Number(t.slice(8,10)),firstMonth:ym,months:6,term:15,job:'',tasks:[],extra:[],quoteId:'',fromQuote:null};
 }
 
-const svcKeyOf=n=>{ n=(n||'').toLowerCase(); if(/web|p[aá]gina|sitio|tienda|landing/.test(n)) return 'web'; if(/\bredes?\b|social|instagram|facebook|tiktok|community/.test(n)) return 'redes'; if(/dashboard|tablero|\bia\b/.test(n)) return 'dash'; if(/pauta|campa[nñ]|\bads\b|publicidad/.test(n)) return 'pauta'; if(/\bseo\b|contenido|blog|posicion/.test(n)) return 'seo'; return 'otro'; };
+const svcKeyOf=n=>{ n=(n||'').toLowerCase(); if(/hosting|dominio|alojamiento/.test(n)) return 'hosting'; if(/dylia|whatsapp|automatiz|chatbot|integraci/.test(n)) return 'dylia'; if(/\berp\b|software|a la medida|dashboard|tablero|\bia\b/.test(n)) return 'sw'; if(/web|p[aá]gina|sitio|tienda|landing/.test(n)) return 'web'; if(/logo|branding|marca|gr[aá]fic|identidad/.test(n)) return 'graf'; if(/plan(es)? de (mercadeo|marketing)/.test(n)) return 'plan'; if(/\bredes?\b|social|instagram|facebook|tiktok|community|marketing|pauta|campa[nñ]|\bads\b|publicidad|\bseo\b|contenido|blog|posicion/.test(n)) return 'redes'; return 'otro'; };
+
+/* banner de cada sección, con el mismo look del Panel general */
+const DYL_SRC='__DYLIA__';
+const _drawBase=draw;
+draw=function(){
+  _drawBase();
+  const app=$('#app'), box=app&&app.querySelector('.main > div[style="margin-bottom:6px"]');
+  const h1=box&&box.querySelector('h1'), sub=box&&box.querySelector('.hint');
+  if(!h1) return;
+  const b=document.createElement('div');
+  b.className='dyl';
+  b.setAttribute('style','min-height:150px');
+  b.innerHTML='<div class="dyl-t"><h1 style="font-size:clamp(24px,3vw,34px);max-width:none">'+esc(h1.textContent)+'</h1>'+(sub?'<div class="hint" style="margin-top:8px;max-width:640px">'+esc(sub.textContent)+'</div>':'')+'</div><img class="dyl-img" style="height:190px;margin:-20px 0" src="'+DYL_SRC+'" alt="">';
+  box.replaceWith(b);
+};
 function applyQuote(q){
   const items=q.items||[], men=items.filter(i=>i.mode==='mensual'), uni=items.filter(i=>i.mode!=='mensual');
   const val=i=>(Number(i.price)||0)*(Number(i.qty)||1), t0=todayS();
@@ -376,8 +391,14 @@ function clientForm(c,pre){
     actions:[{label:'Cancelar',fn:()=>true},{label:editing?'Guardar cambios':'Crear cliente',kind:'pri',fn:()=>editing?saveEdit(c):createClient()}]});
 }
 function paintSvc(){
-  $('#cf-svc').innerHTML=Object.keys(SERVICES).map(k=>'<button type="button" data-m="svc" data-k="'+k+'" aria-pressed="'+D.services.includes(k)+'">'+esc(SERVICES[k].label)+'</button>').join('');
+  const box=$('#cf-svc'); if(!box) return;
+  const wasOpen=!!box.querySelector('details[open]');
+  const sel=D.services.filter(k=>SERVICES[k]&&k!=='otro');
+  const st='<style>#cf-svc{display:block}#cf-svc details{border:1px solid var(--line);border-radius:10px;background:var(--bg)}#cf-svc summary{cursor:pointer;padding:10px 12px;font-weight:600;font-size:13px;list-style:none;display:flex;justify-content:space-between;gap:10px;align-items:center}#cf-svc summary::-webkit-details-marker{display:none}#cf-svc summary::after{content:"\\25BE";color:var(--muted)}#cf-svc .dd-list{border-top:1px solid var(--line);padding:6px;display:flex;flex-direction:column;gap:2px}#cf-svc .dd-opt{display:flex;align-items:center;gap:10px;width:100%;text-align:left;border:0;background:none;border-radius:8px;padding:9px 10px;font-weight:600;font-size:13px;cursor:pointer;color:var(--fg)}#cf-svc .dd-opt:hover{background:var(--surface-2)}#cf-svc .dd-opt[aria-pressed="true"]{background:var(--accent-soft);color:var(--fg)}#cf-svc .dd-box{width:18px;height:18px;border:2px solid var(--gray);border-radius:5px;flex:none;display:grid;place-items:center;font-size:12px;line-height:1}#cf-svc .dd-opt[aria-pressed="true"] .dd-box{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}#cf-svc .dd-opt[aria-pressed="true"] .dd-box::after{content:"\\2713"}</style>';
+  box.innerHTML=st+'<details'+(wasOpen?' open':'')+'><summary><span>'+(sel.length?esc(sel.map(k=>SERVICES[k].label).join(' · ')):'Seleccione los trabajos que realizamos…')+'</span></summary><div class="dd-list">'
+    +Object.keys(SERVICES).map(k=>'<button type="button" class="dd-opt" data-m="svc" data-k="'+k+'" aria-pressed="'+D.services.includes(k)+'"><span class="dd-box"></span>'+esc(SERVICES[k].label)+'</button>').join('')+'</div></details>';
 }
+
 function paintTasks(){
   const box=$('#cf-tasks'); if(!box) return;
   box.innerHTML=D.tasks.length?D.tasks.map((t,i)=>'<div class="trow"><input class="inp t-title" id="tr-title-'+t.id+'" data-g="task" data-i="'+i+'" data-f="title" value="'+esc(t.title)+'" aria-label="Tarea"><input class="inp" id="tr-due-'+t.id+'" type="date" data-g="task" data-i="'+i+'" data-f="due" value="'+esc(t.due)+'" aria-label="Fecha de entrega"><select class="inp" id="tr-own-'+t.id+'" data-g="task" data-i="'+i+'" data-f="owner" aria-label="Responsable"><option'+(t.owner==='Laura'?' selected':'')+'>Laura</option><option'+(t.owner==='Diego'?' selected':'')+'>Diego</option></select><label class="hecha"><input type="checkbox" id="tr-done-'+t.id+'" data-g="task" data-i="'+i+'" data-f="done"'+(t.done?' checked':'')+'> Hecha</label><button class="x" type="button" data-m="del-task-row" data-i="'+i+'" aria-label="Quitar tarea">×</button></div>').join('')+'<div><button class="link" type="button" data-m="tasks-past">Marcar como cumplidas las tareas con fecha anterior a hoy</button></div>':'<div class="hint">Elija el trabajo a realizar o agregue tareas manualmente.</div>';
