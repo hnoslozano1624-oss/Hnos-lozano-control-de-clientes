@@ -21,96 +21,137 @@ const logEntry = (p,text) => (p.log||[]).concat([{at:new Date().toISOString(),te
 /* ───────── dibujo principal ───────── */
 function draw(){
   const app=$('#app');
-  if(S.err){ app.innerHTML=head()+'<div class="welcome"><h3>No se pudo abrir el tablero</h3><p>'+esc(S.err)+'</p></div>'; return; }
-  if(!(S.loaded.c&&S.loaded.t&&S.loaded.p&&S.loaded.e&&S.loaded.s&&S.loaded.q&&S.loaded.r&&S.loaded.k&&S.loaded.g)){ app.innerHTML=head()+'<div class="empty">Cargando clientes…</div>'; return; }
+  if(S.err){ app.innerHTML=shell(head()+'<div class="welcome"><h3>No se pudo abrir el tablero</h3><p>'+esc(S.err)+'</p></div>'); return; }
+  if(!(S.loaded.c&&S.loaded.t&&S.loaded.p&&S.loaded.e&&S.loaded.s&&S.loaded.q&&S.loaded.r&&S.loaded.k&&S.loaded.g)){ app.innerHTML=shell(head()+'<div class="empty">Cargando clientes…</div>'); return; }
   if(S.view==='client' && !clientById(S.cid)){ S.view='cli'; S.cid=null; }
-  app.innerHTML = S.view==='client' ? drawClient() : (S.view==='caja' ? drawCaja() : (S.view==='cot' ? drawCot() : (S.view==='cobro' ? drawCobro() : (S.view==='prod' ? drawProd() : (S.view==='cli' ? drawClients() : (S.view==='pros' ? drawPros() : drawHome()))))));
+  app.innerHTML = shell(S.view==='client' ? drawClient() : (S.view==='caja' ? drawCaja() : (S.view==='cot' ? drawCot() : (S.view==='tareas' ? drawTareas() : S.view==='cobro' ? drawCobro() : (S.view==='prod' ? drawProd() : (S.view==='cli' ? drawClients() : (S.view==='pros' ? drawPros() : drawHome())))))));
 }
 function head(right){
-  return '<header class="hero"><img class="hero-logo" src="'+LOGO_H+'" alt="D&amp;L Hnos. Lozano"><div class="hero-r">'+(right||'')+'</div></header>';
+  return right?'<div class="topbar">'+right+'</div>':'';
 }
+const NAV_ICONS={
+  home:'<path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/>',
+  cli:'<circle cx="9" cy="8" r="3.2"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><path d="M16 4.5a3.2 3.2 0 010 6.2M18 14.3c2 .8 3 2.7 3 5.7"/>',
+  tareas:'<path d="M9 6h11M9 12h11M9 18h11"/><path d="M3.5 6l1.5 1.5L7.5 4.5M3.5 12l1.5 1.5 2.5-2.5M3.5 18l1.5 1.5 2.5-2.5"/>',
+  caja:'<rect x="3" y="6" width="18" height="13" rx="2"/><path d="M3 10h18M16 15h2"/>',
+  pros:'<circle cx="11" cy="11" r="6.5"/><path d="M16 16l5 5"/>',
+  cot:'<path d="M6 3h9l4 4v14H6z"/><path d="M14 3v5h5M9 13h7M9 17h7"/>',
+  cobro:'<circle cx="12" cy="12" r="9"/><path d="M14.5 9.2c-.6-.8-1.5-1.2-2.6-1.2-1.5 0-2.6.8-2.6 2 0 3 5.4 1.4 5.4 4.2 0 1.2-1.2 2-2.8 2-1.2 0-2.2-.5-2.8-1.4M12 6.5V8M12 16v1.5"/>',
+  prod:'<path d="M3 7.5L12 3l9 4.5v9L12 21l-9-4.5z"/><path d="M3 7.5L12 12l9-4.5M12 12v9"/>'
+};
+const NAV_ITEMS=[['home','Panel general'],['cli','Clientes'],['tareas','Tareas pendientes'],['caja','Flujo de caja'],['pros','Prospección'],['cot','Cotizaciones'],['cobro','Cuentas de cobro'],['prod','Productos']];
+function sideNav(){
+  const cur=S.view==='client'?'cli':S.view;
+  return '<aside class="side"><img class="side-logo" src="'+LOGO_H+'" alt="D&amp;L Hnos. Lozano"><nav class="side-nav" aria-label="Menú principal">'
+    +NAV_ITEMS.map(n=>'<button class="side-btn" type="button" data-act="nav" data-v="'+n[0]+'"'+(cur===n[0]?' aria-current="page"':'')+'><svg viewBox="0 0 24 24" aria-hidden="true">'+NAV_ICONS[n[0]]+'</svg><span>'+n[1]+'</span></button>').join('')
+    +'</nav><div class="side-foot">Clientes Mercadeo D&amp;L</div></aside>';
+}
+const shell=inner=>sideNav()+'<main class="main">'+inner+'</main>';
 
 const ymOf = x => (x||'').slice(0,7);
 const monthLabel = ym => { const q=ym.split('-').map(Number); return monthName(q[0],q[1]); };
 function weekRange(){ const d=new Date(), off=(d.getDay()+6)%7; const a=new Date(d.getFullYear(),d.getMonth(),d.getDate()-off), z=new Date(a.getFullYear(),a.getMonth(),a.getDate()+6); return [ymd(a),ymd(z)]; }
 function dayLabel(diff,due){ if(diff<0) return 'Vencidas'; if(diff===0) return 'Hoy'; if(diff===1) return 'Mañana'; const t=new Intl.DateTimeFormat('es-CO',{weekday:'long',day:'numeric',month:'short'}).format(parse(due)).replace(/\./g,''); return t.charAt(0).toUpperCase()+t.slice(1); }
-function navTabs(){ const tb=(v,l)=>'<button class="tab" role="tab" aria-selected="'+(S.view===v)+'" data-act="nav" data-v="'+v+'" type="button">'+l+'</button>'; return '<div class="tabs" role="tablist">'+tb('home','Panel general')+tb('cli','Clientes')+tb('caja','Flujo de caja')+tb('pros','Prospección')+tb('cot','Cotizaciones')+tb('cobro','Cuentas de cobro')+tb('prod','Productos')+'</div>'; }
+function navTabs(){ return ''; }
 
+/* servicio extra que faltaba en el catálogo de servicios (hosting y dominio) */
+if(!SERVICES.hosting){ const _o=SERVICES.otro; delete SERVICES.otro; SERVICES.hosting={label:'Hosting y dominio',tasks:[]}; SERVICES.otro=_o; }
+
+function barRow(label,val,max,txt,color){
+  const w=max>0?Math.max(val>0?3:0,Math.round(val/max*100)):0;
+  return '<div style="display:grid;grid-template-columns:minmax(90px,150px) minmax(0,1fr) auto;gap:10px;align-items:center;padding:6px 0"><div style="font-size:13px;font-weight:600;overflow-wrap:anywhere">'+esc(label)+'</div><div class="bar" style="height:12px"><i style="width:'+w+'%;'+(color?'background:'+color:'')+'"></i></div><div class="num" style="font-weight:700;font-size:13px;text-align:right;min-width:28px">'+esc(txt)+'</div></div>';
+}
 function drawHome(){
-  const t=todayS(), cm=t.slice(0,7);
-  const active=S.clients.filter(c=>c.status!=='cerrado').sort((a,b)=>(a.name||'').localeCompare(b.name||'','es'));
+  const t=todayS(), cm=t.slice(0,7), yr=t.slice(0,4);
+  const active=S.clients.filter(c=>c.status!=='cerrado');
   const inactive=S.clients.filter(c=>c.status==='cerrado');
-  const isAct=id=>{const c=clientById(id);return c&&c.status!=='cerrado';};
-  const alerts=[]; S.pays.forEach(p=>{ const c=clientById(p.clientId); if(!c||c.status==='cerrado') return; const a=payAlert(p,c); if(a) alerts.push({p,c,a}); });
-  alerts.sort((x,y)=>(x.a.lvl==='bad'?0:1)-(y.a.lvl==='bad'?0:1)||x.a.d-y.a.d);
-  const mesTot=sum(active,c=>stats(c).mes), atrasTot=sum(active,c=>stats(c).atras), futTot=sum(active,c=>stats(c).futuro);
-  const ingresos=sum(S.pays.filter(p=>p.received&&ymOf(p.receivedDate)===cm),p=>p.receivedAmount!=null?p.receivedAmount:p.amount)+sum(S.exps.filter(e=>!isPend(e)&&e.kind==='ingreso'&&ymOf(e.date)===cm),e=>e.amount);
-  const prog=S.pays.filter(p=>ymOf(p.billDate)===cm);
-  const gastos=sum(S.exps.filter(e=>!isPend(e)&&e.kind!=='ingreso'&&e.kind!=='reembolso'&&ymOf(e.date)===cm),e=>e.amount);
-  const porPagar=sum(S.exps.filter(e=>isPend(e)&&e.kind!=='ingreso'&&e.date<=monthEnd()),e=>e.amount);
-  const payAl=S.exps.filter(e=>isPend(e)&&e.date&&e.date<=addDays(t,3)).sort((a,b)=>a.date.localeCompare(b.date));
-  const lateT=S.tasks.filter(x=>isAct(x.clientId)&&!x.done&&x.due&&dayDiff(x.due,t)<0);
+  const incIn=ym=>sum(S.pays.filter(p=>p.received&&ymOf(p.receivedDate)===ym),p=>p.receivedAmount!=null?p.receivedAmount:p.amount)+sum(S.exps.filter(e=>!isPend(e)&&e.kind==='ingreso'&&ymOf(e.date)===ym),e=>e.amount);
+  const incYr=pre=>sum(S.pays.filter(p=>p.received&&(p.receivedDate||'').startsWith(pre)),p=>p.receivedAmount!=null?p.receivedAmount:p.amount)+sum(S.exps.filter(e=>!isPend(e)&&e.kind==='ingreso'&&(e.date||'').startsWith(pre)),e=>e.amount);
+  const ingMes=incIn(cm), ingAnio=incYr(yr);
+  const porCobrar=sum(S.pays.filter(p=>{ const c=clientById(p.clientId); return c&&c.status!=='cerrado'&&!p.received; }),p=>p.amount);
+  const pendExp=S.exps.filter(e=>isPend(e)&&e.kind!=='ingreso');
+  const porPagar=sum(pendExp,e=>e.amount);
+  const nm=(()=>{ const d=new Date(); const n=new Date(d.getFullYear(),d.getMonth()+1,1); return ymd(n).slice(0,7); })();
+  const mesNombre=monthLabel(cm).split(' ')[0].toLowerCase();
 
   let h=head();
-  h+='<div class="dyl"><div class="dyl-t"><h1>Inteligencia artificial y tecnología a la medida para que tu negocio venda más.</h1><div class="hint" style="margin-top:6px">'+esc(new Intl.DateTimeFormat('es-CO',{weekday:'long',day:'numeric',month:'long',year:'numeric'}).format(new Date()))+'</div></div><img class="dyl-img" src="__DYLIA__" alt="DYLIA, la IA de D&amp;L Hnos. Lozano"></div>'+navTabs();
+  h+='<div class="dyl"><div class="dyl-t"><h1>Inteligencia artificial y tecnología a la medida para que tu negocio venda más.</h1><div class="hint" style="margin-top:6px">'+esc(new Intl.DateTimeFormat('es-CO',{weekday:'long',day:'numeric',month:'long',year:'numeric'}).format(new Date()))+'</div></div><img class="dyl-img" src="__DYLIA__" alt="DYLIA, la IA de D&amp;L Hnos. Lozano"></div>';
 
   if(!S.clients.length){
     h+='<div class="welcome"><h3>Aún no hay clientes</h3><p>Cree el primer cliente y el tablero arma el plan de trabajo y el calendario de cobro.</p><ol><li>Datos del cliente y alcance del trabajo.</li><li>Entregables, fechas y responsable (Diego o Laura).</li><li>Forma de pago: abonos con saldo a la entrega, o mensualidad.</li></ol><button class="btn pri" data-act="new-client" type="button">Crear primer cliente</button></div>';
     return h;
   }
 
-  h+='<section class="stats" aria-label="Clientes">'
+  h+='<section class="stats" style="grid-template-columns:repeat(3,minmax(0,1fr))" aria-label="Clientes">'
    +stat('Clientes en total',String(S.clients.length),'Registrados en el tablero','')
-   +stat('Activos',String(active.length),'Con trabajo en curso','good')
-   +stat('Inactivos',String(inactive.length),'Trabajo terminado o en pausa','')
-   +stat('Tareas vencidas',String(lateT.length),lateT.length?'Requieren atención hoy':'Todo en fecha',lateT.length?'hot':'')
+   +stat('Clientes activos',String(active.length),'Con trabajo en curso','good')
+   +stat('Clientes inactivos',String(inactive.length),'Trabajo terminado o en pausa','')
    +'</section>';
-  h+='<section class="stats" aria-label="Dinero del mes">'
-   +stat('Ingresos de '+monthLabel(cm).split(' ')[0].toLowerCase(),money(ingresos),'Cobrado en el mes · '+prog.length+' '+plural(prog.length,'cobro programado','cobros programados'),'good')
-   +stat('Cuentas por cobrar',money(mesTot),(atrasTot?'Pago pendiente de clientes; incluye '+money(atrasTot)+' vencido. ':'Pago pendiente de clientes. ')+'A futuro: '+money(futTot),atrasTot?'warm':'')
-   +stat('Cuentas por pagar',money(gastos+porPagar),'Pagado '+money(gastos)+' · Falta pagar '+money(porPagar),porPagar?'warm':'')
-   +stat('Balance del mes',money(ingresos-gastos),'Ingresos cobrados menos gastos',ingresos-gastos<0?'hot':'good')
+  h+='<section class="stats" aria-label="Dinero">'
+   +stat('Ingresos de '+mesNombre,money(ingMes),'Cobrado en el mes actual','good')
+   +stat('Ingresos acumulados '+yr,money(ingAnio),'Suma de lo cobrado en el año','good')
+   +stat('Cuentas por cobrar',money(porCobrar),'Lo que los clientes activos aún nos deben',porCobrar?'warm':'')
+   +stat('Cuentas por pagar',money(porPagar),pendExp.length?pendExp.length+' '+plural(pendExp.length,'pago pendiente','pagos pendientes')+' a proveedores, equipo o socios':'Sin pagos pendientes a terceros',porPagar?'warm':'')
    +'</section>';
 
-  /* prioridades de la semana */
-  const [ws,we]=weekRange();
-  let wk=S.tasks.filter(x=>isAct(x.clientId)&&!x.done&&x.due&&x.due<=we);
-  const cntL=wk.filter(x=>x.owner==='Laura').length, cntD=wk.filter(x=>x.owner==='Diego').length;
-  if(S.prio!=='todos') wk=wk.filter(x=>x.owner===S.prio);
-  wk.sort((a,b)=>a.due.localeCompare(b.due)||(a.title||'').localeCompare(b.title||'','es'));
-  h+='<section class="panel" style="margin-bottom:16px"><div class="panel-h" style="flex-wrap:wrap"><div><h2>Prioridades de la semana</h2><div class="hint" style="margin-top:3px">Semana del '+fmtD(ws)+' al '+fmtD(we)+'. Primero lo vencido, después lo que entregamos pronto.</div></div>'
+  /* ingresos por mes + servicios ofrecidos */
+  const mset=new Set([cm]);
+  S.pays.forEach(p=>{ if(p.received&&(p.receivedDate||'').startsWith(yr)) mset.add(ymOf(p.receivedDate)); });
+  S.exps.forEach(e=>{ if(!isPend(e)&&e.kind==='ingreso'&&(e.date||'').startsWith(yr)) mset.add(ymOf(e.date)); });
+  const months=[...mset].filter(m=>m<=cm).sort();
+  const vals=months.map(m=>incIn(m)), vmax=Math.max(0,...vals);
+  const svcCount={}; S.clients.forEach(c=>(c.services||[]).forEach(k=>{ svcCount[k]=(svcCount[k]||0)+1; }));
+  const svcKeys=Object.keys(svcCount).sort((a,b)=>svcCount[b]-svcCount[a]);
+  const smax=Math.max(0,...svcKeys.map(k=>svcCount[k]));
+  h+='<div class="cols" style="grid-template-columns:minmax(0,1fr) minmax(0,1fr)"><section class="panel"><div class="panel-h"><h2>Ingresos por mes</h2><span class="hint">'+yr+'</span></div>'
+   +months.map((m,i)=>barRow(monthLabel(m).split(' ')[0],vals[i],vmax,money(vals[i]),m===cm?'':'#9AA39A')).join('')
+   +'<div class="hint" style="margin-top:6px">Total del año: <b class="num">'+money(ingAnio)+'</b>. Cada mes nuevo aparece solo cuando hay cobros.</div></section>'
+   +'<section class="panel"><div class="panel-h"><h2>Servicios ofrecidos</h2><span class="hint">'+S.clients.length+' '+plural(S.clients.length,'cliente','clientes')+'</span></div>'
+   +(svcKeys.length?svcKeys.map(k=>barRow((SERVICES[k]||{}).label||k,svcCount[k],smax,String(svcCount[k]))).join('')+'<div class="hint" style="margin-top:6px">Un cliente puede tener varios servicios.</div>':'<div class="empty">Aún no hay servicios asignados a los clientes.</div>')
+   +'</section></div>';
+
+  /* pagos pendientes por cobrar: este mes y el próximo */
+  const open=S.pays.filter(p=>{ const c=clientById(p.clientId); return c&&c.status!=='cerrado'&&!p.received; });
+  const thisM=open.filter(p=>(p.billDate||'')<=monthEnd()).sort((a,b)=>(a.billDate||'').localeCompare(b.billDate||''));
+  const nextM=open.filter(p=>ymOf(p.billDate)===nm).sort((a,b)=>(a.billDate||'').localeCompare(b.billDate||''));
+  const lst=(arr,empty)=>{ let o='<div class="list">'; if(!arr.length) o+='<div class="empty">'+empty+'</div>';
+    arr.slice(0,15).forEach(p=>{ const c=clientById(p.clientId);
+      o+='<div class="row click" data-act="open-client" data-id="'+esc(c.id)+'" data-tab="pay" tabindex="0">'+logoHTML(c,'sm')+'<div class="r-main"><div class="r-title">'+esc(c.name)+' · '+esc(p.label)+'</div><div class="r-sub">Facturar '+fmtD(p.billDate)+(p.dueDate?' · pago esperado '+fmtD(p.dueDate):'')+'</div></div><div class="r-end"><div class="num" style="font-weight:700">'+money(p.amount)+'</div>'+payPill(p,c)+'</div></div>'; });
+    if(arr.length>15) o+='<div class="hint" style="padding-top:8px">y '+(arr.length-15)+' más. Revíselos dentro de cada cliente.</div>';
+    return o+'</div>'; };
+  h+='<div class="cols" style="grid-template-columns:minmax(0,1fr) minmax(0,1fr)"><section class="panel"><div class="panel-h"><h2>Por cobrar este mes</h2><span class="hint">'+thisM.length+' · <b class="num">'+money(sum(thisM,p=>p.amount))+'</b></span></div>'+lst(thisM,'No hay pagos pendientes por cobrar este mes.')+'</section>'
+   +'<section class="panel"><div class="panel-h"><h2>Por cobrar el próximo mes</h2><span class="hint">'+nextM.length+' · <b class="num">'+money(sum(nextM,p=>p.amount))+'</b></span></div>'+lst(nextM,'No hay pagos programados para el próximo mes.')+'</section></div>';
+  return h;
+}
+
+/* pestaña aparte: tareas pendientes */
+function drawTareas(){
+  const t=todayS(), isAct=id=>{ const c=clientById(id); return c&&c.status!=='cerrado'; };
+  let all=S.tasks.filter(x=>isAct(x.clientId)&&!x.done);
+  const cntL=all.filter(x=>x.owner==='Laura').length, cntD=all.filter(x=>x.owner==='Diego').length;
+  const late=all.filter(x=>x.due&&dayDiff(x.due,t)<0).length;
+  if(S.prio!=='todos') all=all.filter(x=>x.owner===S.prio);
+  all.sort((a,b)=>(a.due||'9999').localeCompare(b.due||'9999')||(a.title||'').localeCompare(b.title||'','es'));
+  let h=head();
+  h+='<div style="margin-bottom:6px"><h1>Tareas pendientes</h1><div class="hint" style="margin-top:4px">Todo lo que está por entregar a los clientes activos: primero lo vencido, después por fecha.</div></div>';
+  h+='<section class="stats" style="grid-template-columns:repeat(3,minmax(0,1fr));margin-top:16px" aria-label="Tareas">'
+   +stat('Tareas pendientes',String(S.tasks.filter(x=>isAct(x.clientId)&&!x.done).length),'De clientes activos','')
+   +stat('Vencidas',String(late),late?'Requieren atención hoy':'Todo en fecha',late?'hot':'good')
+   +stat('Por responsable','Laura '+cntL+' · Diego '+cntD,'Tareas abiertas por persona','')
+   +'</section>';
+  h+='<section class="panel"><div class="panel-h" style="flex-wrap:wrap"><h2>Plan de entregas</h2>'
    +'<div class="svc"><button type="button" data-act="prio" data-o="todos" aria-pressed="'+(S.prio==='todos')+'">Todos</button><button type="button" data-act="prio" data-o="Laura" aria-pressed="'+(S.prio==='Laura')+'">Laura · '+cntL+'</button><button type="button" data-act="prio" data-o="Diego" aria-pressed="'+(S.prio==='Diego')+'">Diego · '+cntD+'</button></div></div>';
-  h+='<div class="legend"><span><i style="background:var(--bad)"></i>Vencida</span><span><i style="background:#FF9F43"></i>Para hoy</span><span><i style="background:var(--warn)"></i>Para mañana</span><span><i style="background:var(--accent)"></i>Resto de la semana</span></div>';
-  if(!wk.length) h+='<div class="empty">No hay entregas vencidas ni programadas para esta semana'+(S.prio!=='todos'?' a nombre de '+S.prio:'')+'.</div>';
+  h+='<div class="legend"><span><i style="background:var(--bad)"></i>Vencida</span><span><i style="background:#FF9F43"></i>Para hoy</span><span><i style="background:#E0A21F"></i>Para mañana</span><span><i style="background:var(--accent)"></i>Más adelante</span></div>';
+  if(!all.length) h+='<div class="empty">No hay tareas pendientes'+(S.prio!=='todos'?' a nombre de '+S.prio:'')+'.</div>';
   else {
     let last='';
-    wk.forEach(x=>{ const c=clientById(x.clientId), d=dayDiff(x.due,t), lab=dayLabel(d,x.due);
-      if(lab!==last){ last=lab; h+='<div class="day '+(d<0?'bad':(d===0?'hoy':(d===1?'warn':'ok')))+'">'+esc(lab)+(d<0?'':'')+'</div>'; }
-      h+='<div class="row click pri lv-'+(d<0?'bad':(d===0?'hoy':(d===1?'man':'ok')))+'" data-act="open-client" data-id="'+esc(c.id)+'" data-tab="seg" tabindex="0">'+logoHTML(c,'sm')+'<div class="r-main"><div class="r-title">'+esc(x.title)+'</div><div class="r-sub">'+esc(c.name)+(d<0?' · pactada el '+fmtD(x.due):'')+'</div></div><div class="r-end">'+ownerPill(x.owner)+'<div style="margin-top:4px">'+(d<0?'<span class="pill bad">Atrasada '+(-d)+' '+plural(-d,'día','días')+'</span>':(d===0?'<span class="pill warn">Entregar hoy</span>':(d===1?'<span class="pill warn">Entregar mañana</span>':'<span class="pill">'+fmtD(x.due)+'</span>')))+'</div></div></div>';
+    all.forEach(x=>{ const c=clientById(x.clientId), d=x.due?dayDiff(x.due,t):null, lab=x.due?dayLabel(d,x.due):'Sin fecha';
+      if(lab!==last){ last=lab; h+='<div class="day '+(d==null?'':(d<0?'bad':(d===0?'hoy':(d===1?'warn':'ok'))))+'">'+esc(lab)+'</div>'; }
+      const lv=d==null?'ok':(d<0?'bad':(d===0?'hoy':(d===1?'man':'ok')));
+      h+='<div class="row click pri lv-'+lv+'" data-act="open-client" data-id="'+esc(c.id)+'" data-tab="seg" tabindex="0">'+logoHTML(c,'sm')+'<div class="r-main"><div class="r-title">'+esc(x.title)+'</div><div class="r-sub">'+esc(c.name)+(d!=null&&d<0?' · pactada el '+fmtD(x.due):'')+'</div></div><div class="r-end">'+ownerPill(x.owner)+'<div style="margin-top:4px">'+(d==null?'<span class="pill">Sin fecha</span>':(d<0?'<span class="pill bad">Atrasada '+(-d)+' '+plural(-d,'día','días')+'</span>':(d===0?'<span class="pill warn">Entregar hoy</span>':(d===1?'<span class="pill warn">Entregar mañana</span>':'<span class="pill">'+fmtD(x.due)+'</span>'))))+'</div></div></div>';
     });
   }
-  h+='</section>';
-
-  /* pagos del mes + avisos */
-  const mp=S.pays.filter(p=>{ const c=clientById(p.clientId); if(!c) return false; return ymOf(p.billDate)===cm||(!p.received&&p.billDate<cm+'-01')||(p.received&&ymOf(p.receivedDate)===cm); }).sort((a,b)=>(a.billDate||'').localeCompare(b.billDate||''));
-  h+='<div class="cols"><section class="panel"><div class="panel-h"><h2>Cobros del mes</h2><span class="hint">'+mp.filter(p=>p.received).length+' de '+mp.length+' cobrados</span></div><div class="list">';
-  if(!mp.length) h+='<div class="empty">No hay cobros programados este mes.</div>';
-  mp.slice(0,12).forEach(p=>{ const c=clientById(p.clientId);
-    h+='<div class="row click" data-act="open-client" data-id="'+esc(c.id)+'" data-tab="pay" tabindex="0">'+logoHTML(c,'sm')+'<div class="r-main"><div class="r-title">'+esc(c.name)+' · '+esc(p.label)+'</div><div class="r-sub">Facturar '+fmtD(p.billDate)+(p.dueDate?' · pago esperado '+fmtD(p.dueDate):'')+'</div></div><div class="r-end"><div class="num" style="font-weight:700">'+money(p.amount)+'</div>'+payPill(p,c)+'</div></div>';
-  });
-  if(mp.length>12) h+='<div class="hint" style="padding-top:8px">y '+(mp.length-12)+' más. Revíselos dentro de cada cliente.</div>';
-  h+='</div></section>';
-
-  h+='<section class="panel"><div class="panel-h"><h2>Avisos de cobro y pago</h2><span class="hint">Requieren acción</span></div><div class="list">';
-  if(!alerts.length&&!payAl.length) h+='<div class="empty">Sin facturas por emitir, cobros atrasados ni pagos por vencer. Los avisos aparecen según los días de anticipación de cada cliente.</div>';
-  payAl.slice(0,4).forEach(e=>{ const d=dayDiff(e.date,t), lv=d<0?'bad':'warn';
-    h+='<div class="row click" data-act="nav" data-v="caja" tabindex="0"><span class="stripe '+lv+'"></span><span class="logo sm ini" aria-hidden="true">$</span><div class="r-main"><div class="r-title">Pagar · '+esc(e.payee||e.concept||'Pago pendiente')+'</div><div class="r-sub">'+esc(e.concept||'')+' · vence '+fmtD(e.date)+'</div></div><div class="r-end"><div class="num" style="font-weight:700">'+money(e.amount)+'</div><span class="pill '+lv+'">'+(d<0?'Pago vencido hace '+(-d)+' '+plural(-d,'día','días'):(d===0?'Pagar hoy':'Pagar en '+d+' '+plural(d,'día','días')))+'</span></div></div>'; });
-  alerts.slice(0,10).forEach(x=>{
-    h+='<div class="row click" data-act="open-client" data-id="'+esc(x.c.id)+'" data-tab="pay" tabindex="0"><span class="stripe '+x.a.lvl+'"></span>'+logoHTML(x.c,'sm')+'<div class="r-main"><div class="r-title">'+esc(x.c.name)+' · '+esc(x.p.label)+'</div><div class="r-sub">'+(x.a.kind==='bill'?'Fecha de factura '+fmtD(x.p.billDate):'Pago esperado '+fmtD(x.p.dueDate))+'</div></div><div class="r-end"><div class="num" style="font-weight:700">'+money(x.p.amount)+'</div><span class="pill '+x.a.lvl+'">'+esc(x.a.text)+'</span></div></div>';
-  });
-  h+='</div></section></div>';
-
-  return h;
+  return h+'</section>';
 }
 
 
