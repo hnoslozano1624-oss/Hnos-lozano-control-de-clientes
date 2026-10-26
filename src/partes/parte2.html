@@ -21,6 +21,7 @@ const logEntry = (p,text) => (p.log||[]).concat([{at:new Date().toISOString(),te
 /* ───────── dibujo principal ───────── */
 function draw(){
   const app=$('#app');
+  S.clients.forEach(c=>{ if(Array.isArray(c.services)) c.services=[...new Set(c.services.map(k=>LEGSVC[k]||k))]; });
   if(S.err){ app.innerHTML=shell(head()+'<div class="welcome"><h3>No se pudo abrir el tablero</h3><p>'+esc(S.err)+'</p></div>'); return; }
   if(!(S.loaded.c&&S.loaded.t&&S.loaded.p&&S.loaded.e&&S.loaded.s&&S.loaded.q&&S.loaded.r&&S.loaded.k&&S.loaded.g)){ app.innerHTML=shell(head()+'<div class="empty">Cargando clientes…</div>'); return; }
   if(S.view==='client' && !clientById(S.cid)){ S.view='cli'; S.cid=null; }
@@ -54,8 +55,24 @@ function weekRange(){ const d=new Date(), off=(d.getDay()+6)%7; const a=new Date
 function dayLabel(diff,due){ if(diff<0) return 'Vencidas'; if(diff===0) return 'Hoy'; if(diff===1) return 'Mañana'; const t=new Intl.DateTimeFormat('es-CO',{weekday:'long',day:'numeric',month:'short'}).format(parse(due)).replace(/\./g,''); return t.charAt(0).toUpperCase()+t.slice(1); }
 function navTabs(){ return ''; }
 
-/* servicio extra que faltaba en el catálogo de servicios (hosting y dominio) */
-if(!SERVICES.hosting){ const _o=SERVICES.otro; delete SERVICES.otro; SERVICES.hosting={label:'Hosting y dominio',tasks:[]}; SERVICES.otro=_o; }
+/* catálogo oficial de servicios de D&L (los claves antiguas siguen funcionando como alias ocultos) */
+(function(){
+  const T=SERVICES, o=T.otro;
+  const N={
+    hosting:{label:'Hosting y dominio',tasks:[]},
+    web:{label:'Diseño y desarrollo de páginas web',tasks:T.web.tasks},
+    sw:{label:'Software a la medida y ERP',tasks:T.dash.tasks},
+    redes:{label:'Marketing digital y redes sociales',tasks:T.redes.tasks},
+    dylia:{label:'DYLIA - Automatización de WhatsApp e integraciones',tasks:[['Levantamiento de flujos, canales y mensajes',3],['Configuración de DYLIA e integraciones',12],['Pruebas con el cliente',20],['Entrega y capacitación',25]]},
+    plan:{label:'Planes de mercadeo',tasks:[['Diagnóstico y análisis del negocio',5],['Estrategia y plan de acción',15],['Presentación del plan al cliente',25]]},
+    graf:{label:'Diseño gráfico y branding',tasks:[['Brief y referencias',3],['Propuestas de diseño',10],['Ajustes con el cliente',18],['Entrega de archivos finales',25]]}
+  };
+  Object.keys(T).forEach(k=>delete T[k]);
+  Object.assign(T,N);
+  const hid=(k,v)=>Object.defineProperty(T,k,{value:v,enumerable:false,configurable:true,writable:true});
+  hid('dash',T.sw); hid('pauta',T.redes); hid('seo',T.redes); hid('otro',o);
+})();
+const LEGSVC={dash:'sw',pauta:'redes',seo:'redes'};
 
 function barRow(label,val,max,txt,color){
   const w=max>0?Math.max(val>0?3:0,Math.round(val/max*100)):0;
@@ -100,14 +117,14 @@ function drawHome(){
   S.exps.forEach(e=>{ if(!isPend(e)&&e.kind==='ingreso'&&(e.date||'').startsWith(yr)) mset.add(ymOf(e.date)); });
   const months=[...mset].filter(m=>m<=cm).sort();
   const vals=months.map(m=>incIn(m)), vmax=Math.max(0,...vals);
-  const svcCount={}; S.clients.forEach(c=>(c.services||[]).forEach(k=>{ svcCount[k]=(svcCount[k]||0)+1; }));
+  const svcCount={}; Object.keys(SERVICES).forEach(k=>{ svcCount[k]=0; }); S.clients.forEach(c=>(c.services||[]).forEach(k=>{ if(k in svcCount) svcCount[k]++; }));
   const svcKeys=Object.keys(svcCount).sort((a,b)=>svcCount[b]-svcCount[a]);
   const smax=Math.max(0,...svcKeys.map(k=>svcCount[k]));
   h+='<div class="cols" style="grid-template-columns:minmax(0,1fr) minmax(0,1fr)"><section class="panel"><div class="panel-h"><h2>Ingresos por mes</h2><span class="hint">'+yr+'</span></div>'
    +months.map((m,i)=>barRow(monthLabel(m).split(' ')[0],vals[i],vmax,money(vals[i]),m===cm?'':'#9AA39A')).join('')
    +'<div class="hint" style="margin-top:6px">Total del año: <b class="num">'+money(ingAnio)+'</b>. Cada mes nuevo aparece solo cuando hay cobros.</div></section>'
    +'<section class="panel"><div class="panel-h"><h2>Servicios ofrecidos</h2><span class="hint">'+S.clients.length+' '+plural(S.clients.length,'cliente','clientes')+'</span></div>'
-   +(svcKeys.length?svcKeys.map(k=>barRow((SERVICES[k]||{}).label||k,svcCount[k],smax,String(svcCount[k]))).join('')+'<div class="hint" style="margin-top:6px">Un cliente puede tener varios servicios.</div>':'<div class="empty">Aún no hay servicios asignados a los clientes.</div>')
+   +(svcKeys.some(k=>svcCount[k])?svcKeys.map(k=>barRow((SERVICES[k]||{}).label||k,svcCount[k],smax,String(svcCount[k]))).join('')+'<div class="hint" style="margin-top:6px">Un cliente puede tener varios servicios.</div>':'<div class="empty">Aún no hay servicios asignados a los clientes.</div>')
    +'</section></div>';
 
   /* pagos pendientes por cobrar: este mes y el próximo */
