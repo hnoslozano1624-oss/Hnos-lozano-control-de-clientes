@@ -175,14 +175,17 @@ tabPay=function(c,s){
 };
 
 /* Panel general: "Cuentas por cobrar" abre el detalle de qué cobros lo componen */
-function cxcRows(){
+/* horizonte de proyección: hasta el fin del mes siguiente (lo programado más lejos no se suma) */
+function horizonEnd(){ const q=todayS().split('-').map(Number); return ymd(new Date(q[0],q[1]+1,0)); }
+function cxcAll(){
   return S.pays.filter(p=>{ const c=clientById(p.clientId); return c&&c.status!=='cerrado'&&!p.received; });
 }
+function cxcRows(){ const he=horizonEnd(); return cxcAll().filter(p=>(p.billDate||'')<=he); }
 function cxcDetail(){
   const rows=cxcRows(), total=sum(rows,p=>p.amount), by=new Map();
   rows.forEach(p=>{ if(!by.has(p.clientId)) by.set(p.clientId,[]); by.get(p.clientId).push(p); });
   const groups=[...by.entries()].map(([id,ps])=>({c:clientById(id),ps:ps.sort((a,b)=>(a.billDate||'').localeCompare(b.billDate||'')),sub:sum(ps,p=>p.amount)})).sort((a,b)=>b.sub-a.sub);
-  let b='<p class="hint" style="margin:0">Cobros pendientes de los clientes activos que aún no se han recibido. El total coincide con la cifra del Panel general ('+rows.length+' '+plural(rows.length,'cobro','cobros')+', '+groups.length+' '+plural(groups.length,'cliente','clientes')+').</p>';
+  let b='<p class="hint" style="margin:0">Cobros pendientes de los clientes activos hasta el fin del mes siguiente (lo programado más adelante no se suma). El total coincide con la cifra del Panel general ('+rows.length+' '+plural(rows.length,'cobro','cobros')+', '+groups.length+' '+plural(groups.length,'cliente','clientes')+').</p>';
   if(!rows.length) return b+'<div class="empty">No hay cobros pendientes.</div>';
   b+='<div class="tbl-wrap"><table style="min-width:640px"><thead><tr><th>Concepto</th><th>Facturar</th><th>Pago esperado</th><th>Estado</th><th>Valor</th></tr></thead><tbody>';
   groups.forEach(g=>{
@@ -200,7 +203,17 @@ function cxcOpen(){
 const _drawHomeBase2=drawHome;
 drawHome=function(){
   const h=_drawHomeBase2();
-  return h.replace(/<div class="stat ([^"]*)"><div class="k">Cuentas por cobrar<\/div>([\s\S]*?)<div class="s">([^<]*)<\/div><\/div>/,(m,cls,mid,sub)=>'<div class="stat '+cls+'" data-cxc="1" role="button" tabindex="0" style="cursor:pointer"><div class="k">Cuentas por cobrar</div>'+mid+'<div class="s">'+sub+' · clic para ver el detalle</div></div>');
+  return h.replace(/<div class="stat ([^"]*)"><div class="k">Cuentas por cobrar<\/div>[\s\S]*?<div class="s">[^<]*<\/div><\/div>/,()=>{
+    const rows=cxcRows(), tot=sum(rows,p=>p.amount), ms=todayS().slice(0,7)+'-01', atras=sum(rows.filter(p=>(p.billDate||'')<ms),p=>p.amount), lejos=cxcAll().length-rows.length;
+    const sub=rows.length+' '+plural(rows.length,'cobro','cobros')+' hasta el mes siguiente'+(atras?' · incluye '+money(atras)+' vencido':'')+' · clic para ver el detalle';
+    return stat('Cuentas por cobrar',money(tot),sub,tot?'warm':'').replace(/^<div /,'<div data-cxc="1" role="button" tabindex="0" style="cursor:pointer" ');
+  });
 };
+/* el flujo de caja no avanza más allá del mes siguiente */
+document.addEventListener('click',e=>{
+  const b=e.target.closest&&e.target.closest('[data-act="g-next"]'); if(!b) return;
+  const q=todayS().split('-').map(Number), nx=ymd(new Date(q[0],q[1],1)).slice(0,7);
+  if((S.gMonth||todayS().slice(0,7))>=nx){ e.stopImmediatePropagation(); e.preventDefault(); toast('La proyección llega hasta el mes siguiente'); }
+},true);
 document.addEventListener('click',e=>{ const t=e.target.closest('[data-cxc]'); if(t&&$('#app').contains(t)) cxcOpen(); });
 document.addEventListener('keydown',e=>{ if((e.key==='Enter'||e.key===' ')&&e.target.matches&&e.target.matches('[data-cxc]')){ e.preventDefault(); cxcOpen(); } });
