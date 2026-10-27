@@ -13,6 +13,13 @@ const rd = f => fs.readFileSync(path.join(root, f), 'utf8');
 const parts = fs.readdirSync(path.join(root, 'src/partes')).filter(f => /^parte\d+\.html$/.test(f))
   .sort((a, b) => parseInt(a.slice(5)) - parseInt(b.slice(5)));
 let html = parts.map(f => rd('src/partes/' + f)).join('');
+// Extensión: panel de Hosting y dominio y ajustes de caja; se inserta dentro de la función principal, antes de boot()
+const extFile = path.join(root, 'src/hosting.js');
+if (fs.existsSync(extFile)) {
+  const mark = 'boot();\n})();';
+  if (html.split(mark).length !== 2) throw new Error('No se encontró el punto de inserción de src/hosting.js');
+  html = html.replace(mark, () => fs.readFileSync(extFile, 'utf8') + '\n' + mark);
+}
 
 const GAP = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
 const img = (file, mime) => {
