@@ -173,3 +173,34 @@ tabPay=function(c,s){
   }
   return h;
 };
+
+/* Panel general: "Cuentas por cobrar" abre el detalle de qué cobros lo componen */
+function cxcRows(){
+  return S.pays.filter(p=>{ const c=clientById(p.clientId); return c&&c.status!=='cerrado'&&!p.received; });
+}
+function cxcDetail(){
+  const rows=cxcRows(), total=sum(rows,p=>p.amount), by=new Map();
+  rows.forEach(p=>{ if(!by.has(p.clientId)) by.set(p.clientId,[]); by.get(p.clientId).push(p); });
+  const groups=[...by.entries()].map(([id,ps])=>({c:clientById(id),ps:ps.sort((a,b)=>(a.billDate||'').localeCompare(b.billDate||'')),sub:sum(ps,p=>p.amount)})).sort((a,b)=>b.sub-a.sub);
+  let b='<p class="hint" style="margin:0">Cobros pendientes de los clientes activos que aún no se han recibido. El total coincide con la cifra del Panel general ('+rows.length+' '+plural(rows.length,'cobro','cobros')+', '+groups.length+' '+plural(groups.length,'cliente','clientes')+').</p>';
+  if(!rows.length) return b+'<div class="empty">No hay cobros pendientes.</div>';
+  b+='<div class="tbl-wrap"><table style="min-width:640px"><thead><tr><th>Concepto</th><th>Facturar</th><th>Pago esperado</th><th>Estado</th><th>Valor</th></tr></thead><tbody>';
+  groups.forEach(g=>{
+    b+='<tr style="background:var(--surface-2)"><td colspan="4"><b>'+esc(g.c.name)+'</b> <button class="link" type="button" data-cxc-open="'+esc(g.c.id)+'">Ver pagos del cliente</button></td><td class="num" style="font-weight:800">'+money(g.sub)+'</td></tr>';
+    g.ps.forEach(p=>{ b+='<tr><td style="min-width:200px">'+esc(p.label)+'</td><td class="num" style="white-space:nowrap">'+fmtD(p.billDate)+'</td><td class="num" style="white-space:nowrap">'+fmtD(p.dueDate)+'</td><td>'+payPill(p,g.c)+'</td><td class="num">'+money(p.amount)+'</td></tr>'; });
+  });
+  b+='<tr style="background:var(--surface-2)"><td colspan="4" style="font-weight:800">Total por cobrar</td><td class="num" style="font-weight:800">'+money(total)+'</td></tr></tbody></table></div>';
+  return b;
+}
+function cxcOpen(){
+  openModal({title:'Cuentas por cobrar · detalle',wide:true,body:cxcDetail(),
+    onMount:root=>{ root.addEventListener('click',e=>{ const t=e.target.closest('[data-cxc-open]'); if(!t) return; closeModal(); S.view='client'; S.cid=t.dataset.cxcOpen; S.tab='pay'; render(); window.scrollTo(0,0); }); },
+    actions:[{label:'Cerrar',fn:()=>true}]});
+}
+const _drawHomeBase2=drawHome;
+drawHome=function(){
+  const h=_drawHomeBase2();
+  return h.replace(/<div class="stat ([^"]*)"><div class="k">Cuentas por cobrar<\/div>([\s\S]*?)<div class="s">([^<]*)<\/div><\/div>/,(m,cls,mid,sub)=>'<div class="stat '+cls+'" data-cxc="1" role="button" tabindex="0" style="cursor:pointer"><div class="k">Cuentas por cobrar</div>'+mid+'<div class="s">'+sub+' · clic para ver el detalle</div></div>');
+};
+document.addEventListener('click',e=>{ const t=e.target.closest('[data-cxc]'); if(t&&$('#app').contains(t)) cxcOpen(); });
+document.addEventListener('keydown',e=>{ if((e.key==='Enter'||e.key===' ')&&e.target.matches&&e.target.matches('[data-cxc]')){ e.preventDefault(); cxcOpen(); } });
