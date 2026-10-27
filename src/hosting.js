@@ -1,0 +1,121 @@
+/* ───────── Hosting y dominio: panel propio, alertas y ajuste de la caja proyectada ───────── */
+NAV_ICONS.host='<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3.2 3 14.8 0 18M12 3c-3 3.2-3 14.8 0 18"/>';
+NAV_ITEMS.splice(2,0,['host','Hosting y dominio']);
+
+const hostClients=()=>S.clients.filter(c=>c.status!=='cerrado'&&(c.services||[]).includes('hosting'));
+const daysIn=(y,m)=>new Date(y,m+1,0).getDate();
+const monthBack=s=>{ const d=parse(s), day=d.getDate(), y=d.getFullYear(), m=d.getMonth()-1; const yy=m<0?y-1:y, mm=(m+12)%12; return ymd(new Date(yy,mm,Math.min(day,daysIn(yy,mm)))); };
+const yearFwd=s=>{ const d=parse(s), y=d.getFullYear()+1, m=d.getMonth(); return ymd(new Date(y,m,Math.min(d.getDate(),daysIn(y,m)))); };
+const whenTxt=n=>n===0?'hoy':(n===1?'mañana':'en '+n+' días');
+function hostInfo(c){
+  const h=c.host||{}, t=todayS();
+  if(!h.end) return {c,h,lvl:'bad',key:'nodate',alert:true,sort:'0',text:'Falta registrar las fechas'};
+  const days=dayDiff(h.end,t), rem=monthBack(h.end), sent=h.remindedFor===h.end;
+  const base={c,h,days,rem,sent,sort:h.end};
+  if(days<0) return Object.assign(base,{lvl:'bad',key:'expired',alert:true,text:'Vencido hace '+(-days)+' '+plural(-days,'día','días')});
+  if(t>=rem) return sent
+    ? Object.assign(base,{lvl:'info',key:'sent',alert:false,text:'Recordatorio enviado · vence '+whenTxt(days)})
+    : Object.assign(base,{lvl:'warn',key:'due',alert:true,text:'Enviar recordatorio ahora · vence '+whenTxt(days)});
+  return Object.assign(base,{lvl:'',key:'ok',alert:false,text:'Recordatorio el '+fmtD(rem)});
+}
+const hostAll=()=>hostClients().map(hostInfo);
+
+function drawHost(){
+  const list=hostAll().sort((a,b)=>a.sort.localeCompare(b.sort)||(a.c.name||'').localeCompare(b.c.name||'','es'));
+  const nAlert=list.filter(x=>x.alert).length, soon=list.filter(x=>x.h.end&&x.days>=0&&x.days<=60).length;
+  let h=head();
+  h+='<div style="margin-bottom:6px"><h1>Hosting y dominio</h1><div class="hint" style="margin-top:4px">Clientes con este servicio. Registre el inicio y el vencimiento: un mes antes se activa la alerta para recordarle la renovación al cliente.</div></div>';
+  h+='<section class="stats" style="grid-template-columns:repeat(3,minmax(0,1fr));margin-top:16px" aria-label="Resumen de hosting y dominio">'
+   +stat('Clientes con hosting y dominio',String(list.length),'Marcados en la pestaña Servicios','')
+   +stat('Requieren acción',String(nAlert),nAlert?'Recordatorio por enviar, vencidos o sin fechas':'Todo al día',nAlert?'hot':'good')
+   +stat('Vencen en 60 días',String(soon),'Renovaciones próximas','')
+   +'</section>';
+  if(!list.length) return h+'<div class="empty">Aún no hay clientes con Hosting y dominio. Márquelo en la pestaña Servicios de cada cliente y aparecerá aquí automáticamente.</div>';
+  h+='<div class="tbl-wrap"><table><thead><tr><th>Cliente</th><th>Dominio</th><th>Inicio</th><th>Vencimiento</th><th>Estado</th><th></th></tr></thead><tbody>';
+  list.forEach(x=>{ const c=x.c, k=x.h;
+    h+='<tr><td style="min-width:180px"><div style="display:flex;gap:10px;align-items:center">'+logoHTML(c,'sm')+'<b>'+esc(c.name)+'</b></div></td><td>'+esc(k.domain||'—')+'</td><td class="num" style="white-space:nowrap">'+fmtD(k.start)+'</td><td class="num" style="white-space:nowrap">'+fmtD(k.end)+'</td>'
+     +'<td style="min-width:200px"><span class="pill '+x.lvl+'">'+esc(x.text)+'</span>'+(k.note?'<div class="r-sub">'+esc(k.note)+'</div>':'')+'</td>'
+     +'<td style="text-align:right;min-width:230px">'+(k.end
+        ?'<button class="btn sm'+(x.alert?' pri':'')+'" data-host="remind" data-id="'+esc(c.id)+'" type="button">Recordar al cliente</button> <button class="link" data-host="edit" data-id="'+esc(c.id)+'" type="button">Fechas</button> <button class="link" data-host="renew" data-id="'+esc(c.id)+'" type="button">Renovar</button>'
+        :'<button class="btn sm pri" data-host="edit" data-id="'+esc(c.id)+'" type="button">Registrar fechas</button>')+'</td></tr>'; });
+  return h+'</tbody></table></div>';
+}
+
+function hostForm(c){
+  const k=c.host||{};
+  openModal({title:'Hosting y dominio · '+c.name,
+    body:'<div class="f2"><div class="fld"><label for="hs-start">Fecha de inicio</label><input class="inp" id="hs-start" type="date" value="'+esc(k.start||'')+'"></div><div class="fld"><label for="hs-end">Fecha de vencimiento</label><input class="inp" id="hs-end" type="date" value="'+esc(k.end||'')+'"></div></div>'
+     +'<div class="fld"><label for="hs-dom">Dominio (opcional)</label><input class="inp" id="hs-dom" placeholder="Ej. empresa.com" value="'+esc(k.domain||'')+'"></div>'
+     +'<div class="fld"><label for="hs-note">Notas (opcional)</label><input class="inp" id="hs-note" value="'+esc(k.note||'')+'"></div>'
+     +'<p class="hint" style="margin:0">El recordatorio al cliente se activa un mes antes de la fecha de vencimiento. Al elegir la fecha de inicio se sugiere el vencimiento a un año; puede cambiarlo.</p>',
+    onMount:()=>{ const s=$('#hs-start'), e=$('#hs-end'); s.addEventListener('change',()=>{ if(s.value&&!e.value) e.value=yearFwd(s.value); }); },
+    actions:[{label:'Cancelar',fn:()=>true},{label:'Guardar',kind:'pri',fn:async()=>{
+      const start=$('#hs-start').value, end=$('#hs-end').value;
+      if(!end){ toast('Indique la fecha de vencimiento.'); return false; }
+      if(start&&dayDiff(end,start)<0){ toast('El vencimiento no puede ser anterior al inicio.'); return false; }
+      await patchDoc('clients',c.id,{host:Object.assign({},k,{start,end,domain:$('#hs-dom').value.trim(),note:$('#hs-note').value.trim()})});
+      toast('Fechas de hosting y dominio guardadas'); }}]});
+}
+function hostRenew(c){
+  const k=c.host||{}; if(!k.end) return hostForm(c);
+  const ne=yearFwd(k.end);
+  openModal({title:'Renovar hosting y dominio · '+c.name,
+    body:'<p style="margin:0">El período actual vence el <b>'+fmtD(k.end)+'</b>. Al renovar, el nuevo período inicia en esa fecha y vence el <b>'+fmtD(ne)+'</b>. El recordatorio se vuelve a programar un mes antes.</p>',
+    actions:[{label:'Cancelar',fn:()=>true},{label:'Renovar un año',kind:'pri',fn:async()=>{ await patchDoc('clients',c.id,{host:Object.assign({},k,{start:k.end,end:ne})}); toast('Hosting y dominio renovado hasta '+fmtD(ne)); }}]});
+}
+function hostMsg(c,k){
+  const parts=(c.contact||'').split(/\s*·\s*/), isPh=p=>p.replace(/\D/g,'').length>=7;
+  const person=parts.find(p=>p.trim()&&!/@/.test(p)&&!isPh(p))||c.name;
+  const fecha=new Intl.DateTimeFormat('es-CO',{day:'numeric',month:'long',year:'numeric'}).format(parse(k.end));
+  return 'Estimado(a) '+person+':\n\nLe saludamos de D&L Hnos. Lozano. Le recordamos que el servicio de hosting y dominio'+(k.domain?' ('+k.domain+')':'')+' de '+c.name+' vence el '+fecha+'. Para evitar que el sitio web y los correos asociados dejen de funcionar, le sugerimos programar la renovación con anticipación.\n\nQuedamos atentos para enviarle la cuenta de cobro o factura y coordinar la renovación.\n\nCordialmente,\nEquipo D&L Hnos. Lozano';
+}
+function hostRemind(c){
+  const k=c.host||{}; if(!k.end) return hostForm(c);
+  const parts=(c.contact||'').split(/\s*·\s*/), em=(c.contact||'').match(/[^\s·|,;]+@[^\s·|,;]+\.[^\s·|,;]+/), phRaw=parts.find(p=>p.replace(/\D/g,'').length>=7);
+  let ph=phRaw?phRaw.replace(/\D/g,''):''; if(ph.length===10&&ph[0]==='3') ph='57'+ph;
+  const cur=()=>($('#hs-msg')||{}).value||'';
+  openModal({title:'Recordatorio de renovación · '+c.name,wide:true,
+    body:'<p class="hint" style="margin:0">Vence el '+fmtD(k.end)+'. Revise o edite el mensaje, envíelo al cliente y luego márquelo como enviado para que la alerta desaparezca.</p><div class="fld"><label for="hs-msg">Mensaje al cliente</label><textarea class="inp" id="hs-msg" rows="11">'+esc(hostMsg(c,k))+'</textarea></div>'
+     +'<p class="hint" style="margin:0">'+(ph||em?'Datos de contacto detectados: '+esc([ph?'WhatsApp '+ph:'',em?em[0]:''].filter(Boolean).join(' · ')):'No se detectó teléfono ni correo en los datos del cliente; copie el mensaje y envíelo por su canal habitual.')+'</p>',
+    actions:[{label:'Copiar mensaje',keep:true,fn:async()=>{ try{ await navigator.clipboard.writeText(cur()); }catch(e){ const t=$('#hs-msg'); t.select(); try{ document.execCommand('copy'); }catch(e2){} } toast('Mensaje copiado'); }},
+      ...(ph?[{label:'Abrir WhatsApp',keep:true,fn:()=>{ window.open('https://wa.me/'+ph+'?text='+encodeURIComponent(cur()),'_blank','noopener'); }}]:[]),
+      ...(em?[{label:'Abrir correo',keep:true,fn:()=>{ window.open('mailto:'+em[0]+'?subject='+encodeURIComponent('Renovación de hosting y dominio · '+c.name)+'&body='+encodeURIComponent(cur()),'_blank','noopener'); }}]:[]),
+      {label:'Cerrar',fn:()=>true},
+      {label:'Marcar como enviado',kind:'pri',fn:async()=>{ await patchDoc('clients',c.id,{host:Object.assign({},k,{remindedFor:k.end,remindedAt:todayS()})}); toast('Recordatorio registrado como enviado'); }}]});
+}
+document.addEventListener('click',e=>{
+  const b=e.target.closest('[data-host]'); if(!b||!$('#app').contains(b)) return;
+  const c=clientById(b.dataset.id); if(!c) return;
+  const a=b.dataset.host; if(a==='edit') hostForm(c); else if(a==='remind') hostRemind(c); else if(a==='renew') hostRenew(c);
+});
+
+/* vista propia + alerta en el Panel general */
+const _drawHomeBase=drawHome;
+drawHome=function(){
+  if(S.view==='host') return drawHost();
+  const h=_drawHomeBase(), al=hostAll().filter(x=>x.alert).sort((a,b)=>a.sort.localeCompare(b.sort));
+  if(!al.length) return h;
+  const p='<section class="panel" style="margin-bottom:16px;border-color:var(--warn)"><div class="panel-h"><h2>Alerta: hosting y dominio</h2><span class="hint">'+al.length+' '+plural(al.length,'cliente por atender','clientes por atender')+'</span></div><div class="list">'
+    +al.slice(0,6).map(x=>'<div class="row click" data-act="nav" data-v="host" tabindex="0">'+logoHTML(x.c,'sm')+'<div class="r-main"><div class="r-title">'+esc(x.c.name)+'</div><div class="r-sub">'+(x.h.end?'Vence '+fmtD(x.h.end):'Sin fechas registradas')+'</div></div><div class="r-end"><span class="pill '+x.lvl+'">'+esc(x.text)+'</span></div></div>').join('')
+    +(al.length>6?'<div class="hint" style="padding-top:8px">y '+(al.length-6)+' más en el panel de Hosting y dominio.</div>':'')+'</div></section>';
+  return h.replace(/(<img class="dyl-img"[^>]*><\/div>)/,(m)=>m+p);
+};
+const _drawBase2=draw;
+draw=function(){
+  const n=hostAll().filter(x=>x.alert).length, it=NAV_ITEMS.find(x=>x[0]==='host');
+  if(it) it[1]='Hosting y dominio'+(n?' · '+n:'');
+  _drawBase2();
+};
+
+/* flujo de caja: la "caja proyectada al cierre" pasa a ser lo que los clientes deben pagar en el mes,
+   acumulando lo pendiente de meses anteriores */
+const _drawCajaBase=drawCaja;
+drawCaja=function(){
+  const h=_drawCajaBase(), t=todayS(), cm=t.slice(0,7), m=S.gMonth||cm;
+  if(m<cm) return h;
+  const q=m.split('-').map(Number), mEnd=ymd(new Date(q[0],q[1],0));
+  const cobrar=S.pays.filter(p=>!p.received&&p.billDate<=mEnd&&clientById(p.clientId));
+  const tot=sum(cobrar,p=>p.amount), prev=cobrar.filter(p=>p.billDate<m+'-01');
+  const sub=cobrar.length+' '+plural(cobrar.length,'cobro por recibir','cobros por recibir')+(prev.length?' · incluye '+money(sum(prev,p=>p.amount))+' pendiente de meses anteriores':'');
+  return h.replace(/<div class="stat [^"]*"><div class="k">Caja proyectada al cierre<\/div><div class="v num">[^<]*<\/div><div class="s">[^<]*<\/div><\/div>/,()=>stat('Caja proyectada al cierre',money(tot),sub,''));
+};
