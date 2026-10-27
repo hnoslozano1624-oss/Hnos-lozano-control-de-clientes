@@ -1,6 +1,6 @@
 /* ───────── Hosting y dominio: panel propio, alertas y ajuste de la caja proyectada ───────── */
 NAV_ICONS.host='<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3.2 3 14.8 0 18M12 3c-3 3.2-3 14.8 0 18"/>';
-NAV_ITEMS.splice(2,0,['host','Hosting y dominio']);
+NAV_ITEMS.splice(2,0,['host','Clientes hosting']);
 
 const hostClients=()=>S.clients.filter(c=>c.status!=='cerrado'&&(c.services||[]).includes('hosting'));
 const daysIn=(y,m)=>new Date(y,m+1,0).getDate();
@@ -102,8 +102,6 @@ drawHome=function(){
 };
 const _drawBase2=draw;
 draw=function(){
-  const n=hostAll().filter(x=>x.alert).length, it=NAV_ITEMS.find(x=>x[0]==='host');
-  if(it) it[1]='Hosting y dominio'+(n?' · '+n:'');
   _drawBase2();
 };
 
