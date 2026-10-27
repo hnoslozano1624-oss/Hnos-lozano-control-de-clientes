@@ -361,12 +361,28 @@ function drawClient(){
    +stat('Total tareas pendientes',String(s.pending),s.late?s.late+' vencidas':'Sin vencidas',s.late?'hot':'')
    +stat('% de avance',s.pct+'%',s.done+' de '+s.all+' tareas cumplidas','good')
    +'</section>';
-  const tabs=[['seg','Seguimiento',s.pending],['pay','Pagos',s.ps.length],['done','Ejecutado',s.done],['pw','Contraseñas',(c.creds||[]).length],['info','Ficha','']];
+  const tabs=[['seg','Seguimiento',s.pending],['svc','Servicios',(c.services||[]).filter(k=>SERVICES[k]&&k!=='otro').length],['pay','Pagos',s.ps.length],['done','Ejecutado',s.done],['pw','Contraseñas',(c.creds||[]).length],['info','Ficha','']];
   h+='<div class="tabs" role="tablist">'+tabs.map(t=>'<button class="tab" role="tab" aria-selected="'+(S.tab===t[0])+'" data-act="tab" data-tab="'+t[0]+'" type="button">'+t[1]+(t[2]!==''?'<span class="n">'+t[2]+'</span>':'')+'</button>').join('')+'</div>';
-  h+= S.tab==='pay'?tabPay(c,s): S.tab==='done'?tabDone(c,s): S.tab==='pw'?tabPw(c): S.tab==='info'?tabInfo(c,s,terms): tabSeg(c,s);
+  h+= S.tab==='svc'?tabSvc(c): S.tab==='pay'?tabPay(c,s): S.tab==='done'?tabDone(c,s): S.tab==='pw'?tabPw(c): S.tab==='info'?tabInfo(c,s,terms): tabSeg(c,s);
   return h;
 }
 const esc2 = esc;
+
+/* pestaña Servicios: se marcan los trabajos que se le prestan al cliente (alimenta la gráfica del Panel general) */
+function tabSvc(c){
+  const cur=new Set(c.services||[]), keys=Object.keys(SERVICES), n=keys.filter(k=>cur.has(k)).length;
+  let h='<div class="toolbar"><div><h2>Servicios que le prestamos a '+esc(c.name)+'</h2><div class="hint" style="margin-top:3px">Marque los trabajos que ya se le están haciendo y agregue otro cuando empiecen uno nuevo. El cambio se guarda al instante y alimenta la gráfica de servicios ofrecidos del Panel general.</div></div><span class="pill '+(n?'ok':'')+'">'+n+' '+plural(n,'servicio activo','servicios activos')+'</span></div>';
+  h+='<section class="panel" style="max-width:760px"><div class="list">'+keys.map(k=>{ const on=cur.has(k);
+    return '<button type="button" class="row click" data-svc="'+k+'" aria-pressed="'+on+'" style="width:100%;text-align:left;background:none;border-width:1px 0 0;cursor:pointer"><span class="chk '+(on?'on':'')+'" aria-hidden="true"><svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 7.5l3 3 6-7"/></svg></span><div class="r-main"><div class="r-title">'+esc(SERVICES[k].label)+'</div></div>'+(on?'<span class="pill ok">Se le presta</span>':'<span class="pill">No aplica</span>')+'</button>'; }).join('')+'</div></section>';
+  return h;
+}
+document.addEventListener('click',e=>{
+  const b=e.target.closest('[data-svc]'); if(!b||!$('#app').contains(b)||!S.cid) return;
+  const c=clientById(S.cid); if(!c) return;
+  const k=b.dataset.svc, cur=(c.services||[]).slice(), next=cur.includes(k)?cur.filter(x=>x!==k):cur.concat([k]);
+  c.services=next; render();
+  patchDoc('clients',c.id,{services:next}).catch(err=>{ c.services=cur; render(); fail(err); });
+});
 function logoHTML(c,size){
   const cls='logo '+(size||'');
   if(c&&c.logoId) return '<img class="'+cls+'" src="/_blob/'+esc(c.logoId)+'" alt="Logo de '+esc(c.name)+'">';
