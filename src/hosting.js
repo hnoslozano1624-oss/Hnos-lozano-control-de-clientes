@@ -119,3 +119,57 @@ drawCaja=function(){
   const sub=cobrar.length+' '+plural(cobrar.length,'cobro por recibir','cobros por recibir')+(prev.length?' · incluye '+money(sum(prev,p=>p.amount))+' pendiente de meses anteriores':'');
   return h.replace(/<div class="stat [^"]*"><div class="k">Caja proyectada al cierre<\/div><div class="v num">[^<]*<\/div><div class="s">[^<]*<\/div><\/div>/,()=>stat('Caja proyectada al cierre',money(tot),sub,''));
 };
+
+/* editar el valor del trabajo: el total (abonos) o el valor mensual se reparte entre los cobros pendientes;
+   lo ya cobrado no cambia */
+editJobForm=function(c,job){
+  const ps=paysOf(c.id).filter(p=>jobOf(p)===job);
+  const men=ps.some(p=>p.kind==='mensual');
+  const open=ps.filter(p=>!p.received).sort((a,b)=>(a.billDate||'').localeCompare(b.billDate||''));
+  const recAmt=sum(ps.filter(p=>p.received),p=>p.amount), total=sum(ps,p=>p.amount);
+  const valBox=!open.length
+    ? '<p class="hint" style="margin:0">Todos los cobros de este trabajo ya fueron recibidos. Para cambiar su valor, agregue un pago o edite uno desde la lista.</p>'
+    : (men
+      ? '<div class="fld" style="max-width:320px"><label for="ej-val">Valor mensual (COP)</label><input class="inp num" id="ej-val" inputmode="numeric" value="'+grp(open[0].amount)+'"><span class="hint">Se aplica a los '+open.length+' '+plural(open.length,'mes pendiente','meses pendientes')+'. Los meses ya cobrados no cambian.</span></div>'
+      : '<div class="fld" style="max-width:320px"><label for="ej-val">Valor total del trabajo (COP)</label><input class="inp num" id="ej-val" inputmode="numeric" value="'+grp(total)+'"><span class="hint">Ya cobrado: '+money(recAmt)+'. Si cambia el total, la diferencia se reparte proporcionalmente entre los '+open.length+' '+plural(open.length,'pago pendiente','pagos pendientes')+' (anticipo, saldo, etc.). Lo ya cobrado no cambia.</span></div>');
+  openModal({title:'Editar trabajo',
+    body:'<div class="fld"><label for="ej-name">Nombre del trabajo</label><input class="inp" id="ej-name" value="'+esc(job)+'" placeholder="Ej. Página web"><span class="hint">Al cambiar el nombre se actualizan los '+ps.length+' '+plural(ps.length,'cobro','cobros')+' de este trabajo.</span></div>'
+     +valBox
+     +'<p class="hint" style="margin:0">Para eliminar el trabajo se borran también sus '+ps.length+' '+plural(ps.length,'cobro','cobros')+'. No se puede deshacer.</p>',
+    onMount:()=>{ const v=$('#ej-val'); if(v) v.addEventListener('change',e=>{ e.target.value=grp(num(e.target.value)); }); },
+    actions:[{label:'Eliminar trabajo',kind:'danger',keep:true,fn:b=>{ if(!b.dataset.armed){ b.dataset.armed='1'; b.classList.add('armed'); b.textContent='¿Confirmar eliminación?'; return; } (async()=>{ for(const p of ps) await delDoc('payments',p.id); closeModal(); toast('Trabajo eliminado'); })().catch(fail); }},
+      {label:'Cancelar',fn:()=>true},
+      {label:'Guardar',kind:'pri',fn:async()=>{
+        const nn=($('#ej-name').value||'').trim(), renamed=nn!==job;
+        if(renamed&&nn&&jobsOf(c).some(j=>j.name.toLowerCase()===nn.toLowerCase()&&j.name!==job)){ toast('Ya existe un trabajo con ese nombre.'); return false; }
+        const amounts=new Map(), v=$('#ej-val');
+        if(v){ const nv=num(v.value);
+          if(men){
+            if(nv<=0){ toast('Indique un valor mensual mayor que cero.'); return false; }
+            open.forEach(p=>{ if(p.amount!==nv) amounts.set(p.id,nv); });
+          } else if(nv!==total){
+            if(nv<=recAmt){ toast('El valor total debe ser mayor a lo ya cobrado ('+money(recAmt)+').'); return false; }
+            const R=nv-recAmt, P=sum(open,p=>p.amount); let acc=0;
+            open.forEach((p,i)=>{ const a=i===open.length-1?R-acc:Math.round(P>0?p.amount*R/P:R/open.length); acc+=a; if(a!==p.amount) amounts.set(p.id,a); });
+          }
+        }
+        if(!renamed&&!amounts.size) return true;
+        for(const p of ps){
+          const d={};
+          if(renamed){ d.job=nn; d.label=relabel(p.label,job,nn); }
+          if(amounts.has(p.id)){ d.amount=amounts.get(p.id); d.log=logEntry(p,'Valor ajustado de '+money(p.amount)+' a '+money(d.amount)); }
+          if(Object.keys(d).length) await patchDoc('payments',p.id,d);
+        }
+        if(men&&v&&amounts.size&&job===(c.job||'')) await patchDoc('clients',c.id,{monthly:num(v.value)});
+        toast(amounts.size?'Valor del trabajo actualizado':'Trabajo actualizado'); }}]});
+};
+/* cliente con un solo trabajo: botón visible para editar su valor */
+const _tabPayBase=tabPay;
+tabPay=function(c,s){
+  let h=_tabPayBase(c,s); const jobs=jobsOf(c);
+  if(jobs.length===1){
+    const j0=jobs[0].name;
+    h=h.replace('<button class="btn sm pri" data-act="new-job" type="button">+ Nuevo trabajo</button>',()=>'<button class="btn sm" data-act="edit-job" data-job="'+esc(j0)+'" type="button">Editar valor del trabajo</button><button class="btn sm pri" data-act="new-job" type="button">+ Nuevo trabajo</button>');
+  }
+  return h;
+};
