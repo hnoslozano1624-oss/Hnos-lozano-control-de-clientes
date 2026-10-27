@@ -448,7 +448,7 @@ function updatePrev(){
   if(!g.length){ el.innerHTML='<div class="hint">Indique el primer mes para ver el calendario de facturación.</div>'; return; }
   D.mst=D.mst||{};
   el.innerHTML='<div class="hint" style="margin-bottom:8px">Se programarán <b>'+g.length+'</b> '+plural(g.length,'factura','facturas')+' de '+money(num(D.monthly))+' (total '+money(sum(g,x=>x.amount))+'). Si el cliente ya viene trabajando, marque lo que ya se facturó o se cobró.</div>'
-   +'<div class="tbl-wrap"><table style="min-width:520px"><thead><tr><th>Mes</th><th>Facturar</th><th>Valor</th><th>Estado</th></tr></thead><tbody>'+g.map(x=>'<tr><td style="font-weight:600">'+esc(x.label.replace('Mensualidad ',''))+'</td><td class="num">'+fmtD(x.billDate)+'</td><td class="num">'+money(x.amount)+'</td><td><select class="inp" id="ms-'+x.billDate+'" data-g="mst" data-b="'+x.billDate+'" aria-label="Estado de '+esc(x.label)+'">'+stOpts(D.mst[x.billDate]||'porfacturar')+'</select></td></tr>'; }).join('')+'</tbody></table></div>'
+   +'<div class="tbl-wrap"><table style="min-width:520px"><thead><tr><th>Mes</th><th>Facturar</th><th>Valor</th><th>Estado</th></tr></thead><tbody>'+g.map(x=>'<tr><td style="font-weight:600">'+esc(x.label.replace('Mensualidad ',''))+'</td><td class="num">'+fmtD(x.billDate)+'</td><td class="num">'+money(x.amount)+'</td><td><select class="inp" id="ms-'+x.billDate+'" data-g="mst" data-b="'+x.billDate+'" aria-label="Estado de '+esc(x.label)+'">'+stOpts(D.mst[x.billDate]||'porfacturar')+'</select></td></tr>').join('')+'</tbody></table></div>'
    +'<div style="margin-top:8px"><button class="btn sm" type="button" data-m="mst-past">Marcar como pagados los meses anteriores a hoy</button></div>';
 }
 function updateSum(){
