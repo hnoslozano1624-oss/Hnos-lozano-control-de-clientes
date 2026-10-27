@@ -95,10 +95,10 @@ drawHome=function(){
   if(S.view==='host') return drawHost();
   const h=_drawHomeBase(), al=hostAll().filter(x=>x.alert).sort((a,b)=>a.sort.localeCompare(b.sort));
   if(!al.length) return h;
-  const p='<section class="panel" style="margin-bottom:16px;border-color:var(--warn)"><div class="panel-h"><h2>Alerta: hosting y dominio</h2><span class="hint">'+al.length+' '+plural(al.length,'cliente por atender','clientes por atender')+'</span></div><div class="list">'
+  const p='<section class="panel" style="margin-top:16px;border-color:var(--warn)"><div class="panel-h"><h2>Alerta: hosting y dominio</h2><span class="hint">'+al.length+' '+plural(al.length,'cliente por atender','clientes por atender')+'</span></div><div class="list">'
     +al.slice(0,6).map(x=>'<div class="row click" data-act="nav" data-v="host" tabindex="0">'+logoHTML(x.c,'sm')+'<div class="r-main"><div class="r-title">'+esc(x.c.name)+'</div><div class="r-sub">'+(x.h.end?'Vence '+fmtD(x.h.end):'Sin fechas registradas')+'</div></div><div class="r-end"><span class="pill '+x.lvl+'">'+esc(x.text)+'</span></div></div>').join('')
     +(al.length>6?'<div class="hint" style="padding-top:8px">y '+(al.length-6)+' más en el panel de Hosting y dominio.</div>':'')+'</div></section>';
-  return h.replace(/(<img class="dyl-img"[^>]*><\/div>)/,(m)=>m+p);
+  return h+p;
 };
 const _drawBase2=draw;
 draw=function(){
