@@ -242,7 +242,7 @@ function newDraft(){
     monthly:0,billDay:Number(t.slice(8,10)),firstMonth:ym,months:6,term:15,job:'',tasks:[],extra:[],quoteId:'',fromQuote:null};
 }
 
-const svcKeyOf=n=>{ n=(n||'').toLowerCase(); if(/hosting|dominio|alojamiento/.test(n)) return 'hosting'; if(/dylia|whatsapp|automatiz|chatbot|integraci/.test(n)) return 'dylia'; if(/\berp\b|software|a la medida|dashboard|tablero|\bia\b/.test(n)) return 'sw'; if(/web|p[aá]gina|sitio|tienda|landing/.test(n)) return 'web'; if(/logo|branding|marca|gr[aá]fic|identidad/.test(n)) return 'graf'; if(/plan(es)? de (mercadeo|marketing)/.test(n)) return 'plan'; if(/\bredes?\b|social|instagram|facebook|tiktok|community|marketing|pauta|campa[nñ]|\bads\b|publicidad|\bseo\b|contenido|blog|posicion/.test(n)) return 'redes'; return 'otro'; };
+const svcKeyOf=n=>{ n=(n||'').toLowerCase(); if(/hosting|dominio|alojamiento/.test(n)) return 'hosting'; if(/soporte|mantenimiento/.test(n)) return 'soporte'; if(/dylia|whatsapp|automatiz|chatbot|integraci/.test(n)) return 'dylia'; if(/\berp\b|software|a la medida|dashboard|tablero|\bia\b/.test(n)) return 'sw'; if(/web|p[aá]gina|sitio|tienda|landing/.test(n)) return 'web'; if(/logo|branding|marca|gr[aá]fic|identidad/.test(n)) return 'graf'; if(/plan(es)? de (mercadeo|marketing)/.test(n)) return 'plan'; if(/\bredes?\b|social|instagram|facebook|tiktok|community|marketing|pauta|campa[nñ]|\bads\b|publicidad|\bseo\b|contenido|blog|posicion/.test(n)) return 'redes'; return 'otro'; };
 
 /* banner de cada sección, con el mismo look del Panel general */
 const DYL_SRC='__DYLIA__';
@@ -256,6 +256,14 @@ draw=function(){
   b.className='dyl';
   b.setAttribute('style','min-height:150px');
   b.innerHTML='<div class="dyl-t"><h1 style="font-size:clamp(24px,3vw,34px);max-width:none">'+esc(h1.textContent)+'</h1>'+(sub?'<div class="hint" style="margin-top:8px;max-width:640px">'+esc(sub.textContent)+'</div>':'')+'</div><img class="dyl-img" style="height:190px;margin:-20px 0" src="'+DYL_SRC+'" alt="">';
+  const tb=app.querySelector('.main > .topbar');
+  if(tb && tb.children.length && (tb.compareDocumentPosition(box)&Node.DOCUMENT_POSITION_FOLLOWING)){
+    const acts=document.createElement('div');
+    acts.setAttribute('style','display:flex;gap:8px;flex-wrap:wrap;margin-top:14px');
+    while(tb.firstChild) acts.appendChild(tb.firstChild);
+    b.querySelector('.dyl-t').appendChild(acts);
+    tb.remove();
+  }
   box.replaceWith(b);
 };
 function applyQuote(q){
@@ -440,7 +448,7 @@ function updatePrev(){
   if(!g.length){ el.innerHTML='<div class="hint">Indique el primer mes para ver el calendario de facturación.</div>'; return; }
   D.mst=D.mst||{};
   el.innerHTML='<div class="hint" style="margin-bottom:8px">Se programarán <b>'+g.length+'</b> '+plural(g.length,'factura','facturas')+' de '+money(num(D.monthly))+' (total '+money(sum(g,x=>x.amount))+'). Si el cliente ya viene trabajando, marque lo que ya se facturó o se cobró.</div>'
-   +'<div class="tbl-wrap"><table style="min-width:520px"><thead><tr><th>Mes</th><th>Facturar</th><th>Valor</th><th>Estado</th></tr></thead><tbody>'+g.map(x=>'<tr><td style="font-weight:600">'+esc(x.label.replace('Mensualidad ',''))+'</td><td class="num">'+fmtD(x.billDate)+'</td><td class="num">'+money(x.amount)+'</td><td><select class="inp" id="ms-'+x.billDate+'" data-g="mst" data-b="'+x.billDate+'" aria-label="Estado de '+esc(x.label)+'">'+stOpts(D.mst[x.billDate]||'porfacturar')+'</select></td></tr>').join('')+'</tbody></table></div>'
+   +'<div class="tbl-wrap"><table style="min-width:520px"><thead><tr><th>Mes</th><th>Facturar</th><th>Valor</th><th>Estado</th></tr></thead><tbody>'+g.map(x=>'<tr><td style="font-weight:600">'+esc(x.label.replace('Mensualidad ',''))+'</td><td class="num">'+fmtD(x.billDate)+'</td><td class="num">'+money(x.amount)+'</td><td><select class="inp" id="ms-'+x.billDate+'" data-g="mst" data-b="'+x.billDate+'" aria-label="Estado de '+esc(x.label)+'">'+stOpts(D.mst[x.billDate]||'porfacturar')+'</select></td></tr>'; }).join('')+'</tbody></table></div>'
    +'<div style="margin-top:8px"><button class="btn sm" type="button" data-m="mst-past">Marcar como pagados los meses anteriores a hoy</button></div>';
 }
 function updateSum(){
