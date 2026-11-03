@@ -219,7 +219,14 @@ document.addEventListener('keydown',e=>{ if((e.key==='Enter'||e.key===' ')&&e.ta
 /* ───────── Cuentas de cobro en dólares: moneda por documento, TRM automática ───────── */
 const r2=n=>Math.round((Number(n)||0)*100)/100;
 const trmTxt=n=>new Intl.NumberFormat('es-CO',{minimumFractionDigits:2,maximumFractionDigits:2}).format(Number(n)||0);
-const billUsd=b=>{ const r=Number(b.rate)||0; return r>0?r2(sum(b.items||[],i=>r2((Number(i.price)||0)*(Number(i.qty)||1)/r))):0; };
+const decTxt=n=>new Intl.NumberFormat('es-CO',{maximumFractionDigits:2}).format(Number(n)||0);
+const parseDec=v=>{ v=String(v||'').trim(); if(v.includes(',')) v=v.replace(/\./g,'').replace(',','.'); return Number(v)||0; };
+/* documentos nuevos: los valores de los servicios están en USD (usdPrices); los de la primera versión están en COP y se convierten con la TRM */
+const isUsdBill=b=>b&&b.cur==='USD'&&Number(b.rate)>0;
+const unitUsd=(b,it)=>b.usdPrices?r2(it.price):r2((Number(it.price)||0)/Number(b.rate));
+const lineUsd=(b,it)=>b.usdPrices?r2((Number(it.price)||0)*(Number(it.qty)||1)):r2((Number(it.price)||0)*(Number(it.qty)||1)/Number(b.rate));
+const billUsd=b=>isUsdBill(b)?r2(sum(b.items||[],i=>lineUsd(b,i))):0;
+const billCop=b=>isUsdBill(b)?(b.usdPrices?Math.round(billUsd(b)*Number(b.rate)):billTotal(b)):billTotal(b);
 const usdLetras=n=>{
   n=Number(n)||0; const e=Math.floor(n+1e-9), c=Math.round((n-e)*100);
   if(e===1&&!c) return 'Un dólar estadounidense';
@@ -236,12 +243,31 @@ async function fetchTRM(dateStr){
   return {rate:Number(j[0].valor),from:String(j[0].vigenciadesde).slice(0,10),to:String(j[0].vigenciahasta).slice(0,10)};
 }
 
-/* formulario: selector de moneda, TRM y vista previa en dólares */
+/* formulario: al cobrar en dólares, los valores de los servicios se escriben y se ven en USD */
+const _paintBillItemsBase=paintBillItems;
+paintBillItems=function(){
+  _paintBillItemsBase();
+  if(!BF||BF.cur!=='USD') return;
+  BF.items.forEach((it,i)=>{
+    const inp=$('#bi-p'+i), lab=document.querySelector('label[for="bi-p'+i+'"]'), tt=$('#bi-t'+i);
+    if(lab) lab.textContent='Valor unitario (USD)';
+    if(inp){ inp.setAttribute('inputmode','decimal'); inp.value=it.price?decTxt(it.price):''; }
+    if(tt) tt.textContent=qMoney(r2((Number(it.price)||0)*(Number(it.qty)||1)),'USD');
+  });
+};
+const _updateBillTotBase=updateBillTot;
+updateBillTot=function(){
+  if(!BF||BF.cur!=='USD') return _updateBillTotBase();
+  const el=$('#b-tot'); if(!el) return;
+  const t=r2(sum(BF.items,i=>r2((Number(i.price)||0)*(Number(i.qty)||1))));
+  el.innerHTML=t?'<span>Total a cobrar <b>'+esc(qMoney(t,'USD'))+'</b></span><span class="hint">'+esc(usdLetras(t))+(BF.rate?' · equivale a '+esc(money(Math.round(t*Number(BF.rate))))+' con la TRM':'')+'</span>':'<span class="hint">Ingrese cantidad y valor en dólares de cada servicio.</span>';
+};
 const _billFormBase=billForm;
 billForm=function(b){
   _billFormBase(b);
   const dateFld=$('#b-date'); if(!dateFld) return;
   BF.cur=BF.cur==='USD'?'USD':'COP';
+  BF.pcur=(BF.cur==='USD'&&BF.usdPrices)?'USD':'COP';   /* moneda en que están hoy los valores del formulario */
   const box=document.createElement('div');
   box.id='b-curbox';
   box.innerHTML='<hr class="hr"><div class="f3"><div class="fld"><label for="b-cur">Moneda de cobro</label><select class="inp" id="b-cur"><option value="COP">Pesos colombianos (COP)</option><option value="USD">Dólares (USD)</option></select></div>'
@@ -252,58 +278,78 @@ billForm=function(b){
   const cur=$('#b-cur'), rate=$('#b-rate'), hint=$('#b-usd-hint');
   cur.value=BF.cur;
   if(BF.rate) rate.value=String(BF.rate).replace('.',',');
-  const parseRate=v=>{ v=String(v||'').trim(); if(v.includes(',')) v=v.replace(/\./g,'').replace(',','.'); return Number(v)||0; };
+  /* convierte los valores de los servicios cuando cambia la moneda y ya hay TRM */
+  const sync=()=>{
+    if(BF.cur===BF.pcur||!(Number(BF.rate)>0)) return;
+    const R=Number(BF.rate);
+    BF.items.forEach(it=>{ const p=Number(it.price)||0; it.price=BF.cur==='USD'?r2(p/R):Math.round(p*R); });
+    BF.pcur=BF.cur; paintBillItems();
+  };
   const paint=()=>{
     const usd=BF.cur==='USD';
     $('#b-rate-f').style.display=usd?'':'none'; $('#b-trm-f').style.display=usd?'':'none';
     if(!usd){ hint.textContent='El documento se emite en pesos colombianos.'; return; }
-    const tot=sum(BF.items,i=>(Number(i.price)||0)*(Number(i.qty)||1)), t=billUsd({items:BF.items,rate:BF.rate});
-    const src=BF.rateSrc==='trm'&&BF.rate?' TRM oficial vigente del '+fmtD(BF.rateFrom||BF.date)+' al '+fmtD(BF.rateTo||BF.date)+' (Superfinanciera).':(BF.rate?' Tasa ingresada manualmente.':'');
-    hint.innerHTML='Los valores de los servicios se ingresan en pesos y el documento los muestra en dólares con esta tasa.'+src+(BF.rate&&tot?' <b>Total en dólares: '+esc(qMoney(t,'USD'))+'</b> (equivale a '+esc(money(tot))+').':'');
+    const src=BF.rateSrc==='trm'&&BF.rate?' TRM oficial vigente del '+fmtD(BF.rateFrom||BF.date)+' al '+fmtD(BF.rateTo||BF.date)+' (Superfinanciera).':(BF.rate?' Tasa ingresada manualmente.':' Consulte o escriba la TRM para convertir los valores a dólares.');
+    hint.innerHTML='Escriba el valor de cada servicio en dólares; la TRM se usa para mostrar el equivalente en pesos.'+src;
   };
   const getTrm=async(quiet)=>{
     const btn=$('#b-trm'); if(btn) btn.disabled=true;
-    try{ const x=await fetchTRM(BF.date); BF.rate=x.rate; BF.rateSrc='trm'; BF.rateFrom=x.from; BF.rateTo=x.to; BF.rateDate=BF.date; rate.value=String(x.rate).replace('.',','); }
+    try{ const x=await fetchTRM(BF.date); BF.rate=x.rate; BF.rateSrc='trm'; BF.rateFrom=x.from; BF.rateTo=x.to; BF.rateDate=BF.date; rate.value=String(x.rate).replace('.',','); sync(); }
     catch(e){ if(!quiet) toast('No se pudo consultar la TRM. Escríbala manualmente.'); else hint.textContent='No se pudo consultar la TRM automática. Escríbala manualmente.'; }
-    if(btn) btn.disabled=false; paint();
+    if(btn) btn.disabled=false; paint(); updateBillTot();
   };
-  cur.addEventListener('change',()=>{ BF.cur=cur.value; paint(); if(BF.cur==='USD'&&!BF.rate) getTrm(true); });
-  rate.addEventListener('input',()=>{ BF.rate=parseRate(rate.value); BF.rateSrc='manual'; paint(); });
+  cur.addEventListener('change',()=>{
+    if(cur.value==='COP'&&BF.pcur==='USD'&&!(Number(BF.rate)>0)){ toast('Indique la TRM para convertir los valores a pesos.'); cur.value='USD'; return; }
+    BF.cur=cur.value; paint();
+    if(BF.cur==='USD'&&!(Number(BF.rate)>0)) getTrm(true); else { sync(); paintBillItems(); }
+  });
+  rate.addEventListener('input',()=>{ BF.rate=parseDec(rate.value); BF.rateSrc='manual'; paint(); updateBillTot(); });
+  rate.addEventListener('change',()=>{ sync(); });
   $('#b-trm').addEventListener('click',()=>getTrm(false));
   $('#b-date').addEventListener('change',()=>{ if(BF.cur==='USD'&&BF.rateSrc==='trm') getTrm(true); });
-  $('#m-body').addEventListener('input',e=>{ if(e.target.dataset&&e.target.dataset.bi) paint(); });
-  $('#m-body').addEventListener('click',e=>{ if(e.target.closest('[data-m]')) setTimeout(paint,0); });
-  paint();
-  if(BF.cur==='USD'&&!BF.rate) getTrm(true);
+  const mb=$('#m-body');
+  /* en dólares el valor admite decimales: se atiende aquí y no con el manejador en pesos */
+  mb.addEventListener('input',e=>{ const t=e.target; if(BF.cur!=='USD'||!t.dataset||t.dataset.f!=='price') return;
+    e.stopPropagation(); const it=BF.items[Number(t.dataset.i)]; if(!it) return; it.price=parseDec(t.value);
+    const tt=$('#bi-t'+t.dataset.i); if(tt) tt.textContent=qMoney(r2(it.price*(Number(it.qty)||1)),'USD'); updateBillTot(); },true);
+  mb.addEventListener('change',e=>{ const t=e.target; if(BF.cur!=='USD'||!t.dataset||t.dataset.f!=='price') return;
+    e.stopPropagation(); const it=BF.items[Number(t.dataset.i)]; if(it) t.value=it.price?decTxt(it.price):''; },true);
+  mb.addEventListener('input',e=>{ if(BF.cur==='USD'&&e.target.dataset&&e.target.dataset.f==='qty'){ setTimeout(()=>{ const i=Number(e.target.dataset.i), it=BF.items[i], tt=$('#bi-t'+i); if(it&&tt) tt.textContent=qMoney(r2((Number(it.price)||0)*(Number(it.qty)||1)),'USD'); updateBillTot(); },0); } });
+  mb.addEventListener('click',e=>{ if(e.target.closest('[data-m]')) setTimeout(updateBillTot,0); });
+  if(BF.cur==='USD'){ if(Number(BF.rate)>0) sync(); else getTrm(true); }
+  paint(); paintBillItems();
 };
 /* al guardar: moneda, tasa y su origen quedan en el documento */
 const _saveBillBase=saveBill;
 saveBill=async function(b,andPdf){
   const usd=BF.cur==='USD';
   if(usd&&!(Number(BF.rate)>0)){ toast('Indique la TRM para cobrar en dólares.'); return false; }
-  const extra=usd?{cur:'USD',rate:Number(BF.rate),rateSrc:BF.rateSrc||'manual',rateDate:BF.rateDate||BF.date||todayS(),rateFrom:BF.rateFrom||'',rateTo:BF.rateTo||''}:{cur:'COP',rate:null,rateSrc:'',rateDate:'',rateFrom:'',rateTo:''};
+  if(usd&&BF.pcur!=='USD'){ toast('Espere a que se convierta el valor a dólares e intente de nuevo.'); return false; }
+  const extra=usd?{cur:'USD',usdPrices:true,rate:Number(BF.rate),rateSrc:BF.rateSrc||'manual',rateDate:BF.rateDate||BF.date||todayS(),rateFrom:BF.rateFrom||'',rateTo:BF.rateTo||''}:{cur:'COP',usdPrices:false,rate:null,rateSrc:'',rateDate:'',rateFrom:'',rateTo:''};
   const sd=saveDoc;
   saveDoc=async function(coll,id,data){ if(coll==='bills') Object.assign(data,extra); return sd.apply(this,arguments); };
   try{ return await _saveBillBase(b,andPdf); } finally{ saveDoc=sd; }
 };
 
-/* lista: las cuentas en dólares muestran su total en USD */
+/* lista: las cuentas en dólares muestran su total en USD y los resúmenes suman su equivalente en pesos */
 const _drawCobroBase=drawCobro;
 drawCobro=function(){
   let h=_drawCobroBase();
-  S.bills.filter(b=>b.cur==='USD'&&Number(b.rate)>0).forEach(b=>{
+  S.bills.filter(isUsdBill).forEach(b=>{
     const key='<td class="num" style="font-weight:800">'+esc(b.num||billNo(b.n||0))+'</td>', i=h.indexOf(key); if(i<0) return;
     const j=h.indexOf('</tr>',i), row=h.slice(i,j);
-    const nr=row.replace(/<td class="num">[^<]*<\/td>/,()=>'<td class="num">'+esc(qMoney(billUsd(b),'USD'))+'<div class="hint">'+esc(money(billTotal(b)))+' · TRM '+esc(trmTxt(b.rate))+'</div></td>');
+    const nr=row.replace(/<td class="num">[^<]*<\/td>/,()=>'<td class="num">'+esc(qMoney(billUsd(b),'USD'))+'<div class="hint">'+esc(money(billCop(b)))+' · TRM '+esc(trmTxt(b.rate))+'</div></td>');
     h=h.slice(0,i)+nr+h.slice(j);
   });
+  const pend=S.bills.filter(b=>b.status!=='pagada'), paid=S.bills.filter(b=>b.status==='pagada');
+  h=h.replace(/Por cobrar [^<]*/,()=>'Por cobrar '+money(sum(pend,billCop))).replace(/Cobrado [^<]*/,()=>'Cobrado '+money(sum(paid,billCop)));
   return h;
 };
 
 /* PDF en dólares: misma presentación, valores en USD y equivalencia en pesos con la TRM */
 const _buildBillPdfBase=buildBillPdf;
 buildBillPdf=async function(b){
-  if(!(b.cur==='USD'&&Number(b.rate)>0)) return _buildBillPdfBase(b);
+  if(!isUsdBill(b)) return _buildBillPdfBase(b);
   const JsPDF=await loadJsPdf(), E=empData(), T=pdfTxt, RT=Number(b.rate);
   const doc=new JsPDF({unit:'mm',format:'a4'}), W=210, H=297, M=14, R=W-M, LIM=H-22;
   const DARK=[26,20,18], GREEN=[126,211,33], GD=[62,142,15], GRAY=[100,100,96], INK=[30,26,24], LINE=[222,222,216];
@@ -311,7 +357,7 @@ buildBillPdf=async function(b){
   const col=c=>doc.setTextColor(c[0],c[1],c[2]);
   const font=(st,sz,c)=>{ doc.setFont('helvetica',st); doc.setFontSize(sz); col(c||INK); };
   const lines=(t,w)=>doc.splitTextToSize(T(t),w);
-  const NO=b.num||billNo(b.n||0), totalUsd=billUsd(b), totalCop=billTotal(b), U=n=>pdfMoney(n,'USD');
+  const NO=b.num||billNo(b.n||0), totalUsd=billUsd(b), totalCop=billCop(b), U=n=>pdfMoney(n,'USD');
   function band(first){
     const bh=first?40:20;
     doc.setFillColor(...DARK); doc.rect(0,0,W,bh,'F');
@@ -344,8 +390,8 @@ buildBillPdf=async function(b){
   (b.items||[]).forEach(it=>{
     if(y+20>LIM){ doc.addPage(); y=band(false); thead(); }
     const y0=y, qn=Number(it.qty)||1; y+=5.5;
-    font('normal',8.5,INK); doc.text(String(qn),CX.qty,y0+5.5,{align:'right'}); doc.text(U(r2((Number(it.price)||0)/RT)),CX.unit,y0+5.5,{align:'right'});
-    font('bold',9,INK); doc.text(U(r2((Number(it.price)||0)*qn/RT)),CX.sub,y0+5.5,{align:'right'});
+    font('normal',8.5,INK); doc.text(String(qn),CX.qty,y0+5.5,{align:'right'}); doc.text(U(unitUsd(b,it)),CX.unit,y0+5.5,{align:'right'});
+    font('bold',9,INK); doc.text(U(lineUsd(b,it)),CX.sub,y0+5.5,{align:'right'});
     font('bold',9.5,INK); lines(it.name,SW).forEach(l=>{ doc.text(l,CX.svc,y); y+=4.6; });
     if(it.detail){ font('normal',8.5,GRAY); lines(it.detail,SW).forEach(l=>{ if(y>LIM){ doc.addPage(); y=band(false)+4; font('normal',8.5,GRAY); } doc.text(l,CX.svc,y); y+=4; }); }
     y+=2.5; doc.setDrawColor(...LINE); doc.setLineWidth(0.2); doc.line(M,y,R,y);
@@ -379,10 +425,10 @@ buildBillPdf=async function(b){
 /* correo: el valor se indica en la moneda del documento */
 const _mailBillBase=mailBill;
 mailBill=async function(b){
-  if(!(b.cur==='USD'&&Number(b.rate)>0)) return _mailBillBase(b);
+  if(!isUsdBill(b)) return _mailBillBase(b);
   const E=empData(), ok=await pdfBill(b); if(!ok) return;
   const subj='Cuenta de cobro '+(b.num||'')+' - '+E.cbNombre;
-  const body='Estimado(a) '+(b.cContact||b.cName||'cliente')+',\n\nAdjunto la cuenta de cobro '+(b.num||'')+' por valor de '+qMoney(billUsd(b),'USD')+' (equivalentes a '+money(billTotal(b))+' a la TRM de $ '+trmTxt(b.rate)+'), correspondiente a los servicios prestados por '+E.cbNombre+'.\n\nQuedamos atentos a cualquier inquietud.\n\nCordialmente,\n'+E.cbFirma+'\n'+E.cbNombre;
+  const body='Estimado(a) '+(b.cContact||b.cName||'cliente')+',\n\nAdjunto la cuenta de cobro '+(b.num||'')+' por valor de '+qMoney(billUsd(b),'USD')+' (equivalentes a '+money(billCop(b))+' a la TRM de $ '+trmTxt(b.rate)+'), correspondiente a los servicios prestados por '+E.cbNombre+'.\n\nQuedamos atentos a cualquier inquietud.\n\nCordialmente,\n'+E.cbFirma+'\n'+E.cbNombre;
   window.location.href='mailto:'+encodeURIComponent(b.cEmail||'')+'?subject='+encodeURIComponent(subj)+'&body='+encodeURIComponent(body);
   toast('Se abrió el correo: adjunte el PDF que se acaba de descargar.');
 };
