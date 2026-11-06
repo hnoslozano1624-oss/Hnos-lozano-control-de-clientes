@@ -785,3 +785,17 @@ drawCaja=function(){
   const k=h.search(/<div class="toolbar"><div><h2>(?:Pagos de |Proyección de pagos de )/);
   return k<0?h:h.slice(0,k)+teamChart(y)+h.slice(k);
 };
+
+/* Flujo de caja: no se navega antes del primer mes con operación y se quita el atajo a septiembre */
+const firstOpMonth=()=>{ let m=''; const f=d=>{ d=(d||'').slice(0,7); if(d&&(!m||d<m)) m=d; };
+  S.exps.forEach(e=>f(e.date)); S.pays.forEach(p=>{ f(p.billDate); f(p.receivedDate); });
+  return m||todayS().slice(0,7); };
+const _drawCajaBase3=drawCaja;
+drawCaja=function(){
+  const f=firstOpMonth(); if(S.gMonth&&S.gMonth<f) S.gMonth=f;
+  let h=_drawCajaBase3();
+  h=h.replace('<button class="link" data-act="g-sep" type="button">Ir a septiembre</button>','');
+  if((S.gMonth||todayS().slice(0,7))<=f) h=h.replace('<button class="btn sm" data-act="g-prev" type="button"','<button class="btn sm" data-act="g-prev" disabled style="opacity:.4;cursor:not-allowed" type="button"');
+  return h;
+};
+document.addEventListener('click',e=>{ const b=e.target.closest&&e.target.closest('[data-act="g-prev"]'); if(!b) return; if((S.gMonth||todayS().slice(0,7))<=firstOpMonth()){ e.stopImmediatePropagation(); e.preventDefault(); toast('La operación inició en '+monthLabel(firstOpMonth())); } },true);
