@@ -616,3 +616,49 @@ function rollMonthly(){
 const _drawBase3=draw;
 draw=function(){ _drawBase3(); try{ rollMonthly(); }catch(e){} };
 new MutationObserver(fixMonthly).observe(document.body,{childList:true,subtree:true});
+
+/* ───────── Panel general más claro: Clientes · Ingresos · Por cobrar y por pagar ───────── */
+const secT=t=>'<div class="hint" style="margin:26px 0 10px;font-weight:800;text-transform:uppercase;letter-spacing:.09em;font-size:11.5px">'+esc(t)+'</div>';
+const recIn=pre=>sum(S.pays.filter(p=>p.received&&(p.receivedDate||'').startsWith(pre)),p=>p.receivedAmount!=null?p.receivedAmount:p.amount)+sum(S.exps.filter(e=>e.status!=='pendiente'&&e.kind==='ingreso'&&(e.date||'').startsWith(pre)),e=>e.amount);
+function flowRow(label,amount,sub,big){
+  return '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:12px;padding:10px 0;border-top:1px solid var(--line)"><div><div style="font-weight:700">'+esc(label)+'</div><div class="hint">'+esc(sub)+'</div></div><div class="num" style="font-weight:800;font-size:'+(big?'22':'18')+'px;white-space:nowrap">'+money(amount)+'</div></div>';
+}
+const _drawHomeBase3=drawHome;
+drawHome=function(){
+  let h=_drawHomeBase3();
+  if(S.view==='host'||!S.clients.length) return h;
+  const t=todayS(), q=t.split('-').map(Number), cm=t.slice(0,7), yr=t.slice(0,4);
+  const nmD=new Date(q[0],q[1],1), nm=ymd(nmD).slice(0,7), pmD=new Date(q[0],q[1]-2,1), pm=ymd(pmD).slice(0,7);
+  const mes=MESES[q[1]-1], mesSig=MESES[nmD.getMonth()], mesAnt=MESES[pmD.getMonth()];
+  const ms=cm+'-01', me=ymd(new Date(q[0],q[1],0));
+  /* ingresos */
+  const acum=recIn(yr), mesIn=recIn(cm), antIn=recIn(pm), dif=mesIn-antIn;
+  const cmp=antIn?(dif>=0?'$ '+grp(dif)+' más que en '+mesAnt:'$ '+grp(-dif)+' menos que en '+mesAnt):'Cobrado en el mes en curso';
+  const ing='<section class="stats" style="grid-template-columns:repeat(2,minmax(0,1fr))" aria-label="Ingresos">'
+    +stat('Ingresos acumulados '+yr,money(acum),'Todo lo cobrado en lo que va del año','good')
+    +stat('Ingresos de '+mes,money(mesIn),cmp,'good')+'</section>';
+  /* por cobrar: este mes y el siguiente */
+  const pend=cxcAll(), cMes=pend.filter(p=>(p.billDate||'')>=ms&&(p.billDate||'')<=me), cSig=pend.filter(p=>ymOf(p.billDate)===nm), cAnt=pend.filter(p=>(p.billDate||'')<ms);
+  const sCMes=sum(cMes,p=>p.amount), sCSig=sum(cSig,p=>p.amount), sCAnt=sum(cAnt,p=>p.amount);
+  const cob='<section class="panel"><div class="panel-h" style="min-height:36px;align-items:center"><h2>Por cobrar</h2><button class="link" data-cxc="1" type="button">Ver detalle</button></div>'
+    +flowRow('Este mes ('+mes+')',sCMes,cMes.length+' '+plural(cMes.length,'cobro pendiente','cobros pendientes'),true)
+    +flowRow('Mes siguiente ('+mesSig+')',sCSig,cSig.length+' '+plural(cSig.length,'cobro programado','cobros programados'))
+    +(sCAnt?flowRow('Vencido de meses anteriores',sCAnt,cAnt.length+' '+plural(cAnt.length,'cobro sin pagar','cobros sin pagar')+' · no suma arriba'):'')
+    +'</section>';
+  /* por pagar: gastos proyectados */
+  const pg=S.exps.filter(e=>e.status==='pendiente'&&e.kind!=='ingreso'), gMes=pg.filter(e=>(e.date||'')<=me), gSig=pg.filter(e=>ymOf(e.date)===nm);
+  const sGMes=sum(gMes,e=>e.amount), sGSig=sum(gSig,e=>e.amount);
+  const prox=gMes.concat(gSig).sort((a,b)=>(a.date||'').localeCompare(b.date||'')).slice(0,4);
+  const pag='<section class="panel"><div class="panel-h" style="min-height:36px;align-items:center"><h2>Por pagar</h2><span style="display:flex;gap:8px;align-items:center"><button class="link" data-act="nav" data-v="caja" type="button">Ver en Flujo de caja</button><button class="btn sm pri" data-pp="new" type="button">+ Proyectar gasto</button></span></div>'
+    +flowRow('Este mes ('+mes+')',sGMes,gMes.length+' '+plural(gMes.length,'pago pendiente','pagos pendientes'),true)
+    +flowRow('Mes siguiente ('+mesSig+')',sGSig,gSig.length+' '+plural(gSig.length,'pago proyectado','pagos proyectados'))
+    +(prox.length?'<div class="hint" style="margin-top:6px">Próximos: '+prox.map(e=>esc((e.payee||e.concept||expLabel(e))+' '+fmtD(e.date)+' · '+money(e.amount))).join(' · ')+'</div>':'<div class="hint" style="margin-top:6px">Aún no hay gastos proyectados. Use «+ Proyectar gasto» para anotar lo que debe pagar (pauta, plataformas, equipo, proveedores).</div>')
+    +'</section>';
+  const money2=secT('Ingresos')+ing+secT('Lo que viene: por cobrar y por pagar')+'<div class="cols" style="grid-template-columns:minmax(0,1fr) minmax(0,1fr)">'+cob+pag+'</div>';
+  h=h.replace(/<section class="stats" aria-label="Dinero">[\s\S]*?<\/section>/,()=>money2);
+  h=h.replace('<section class="stats" style="grid-template-columns:repeat(3,minmax(0,1fr))" aria-label="Clientes">',()=>secT('Clientes').replace('margin:26px 0 10px','margin:8px 0 10px')+'<section class="stats" style="grid-template-columns:repeat(3,minmax(0,1fr))" aria-label="Clientes">');
+  h=h.replace('<div class="cols" style="grid-template-columns:minmax(0,1fr) minmax(0,1fr)"><section class="panel"><div class="panel-h"><h2>Ingresos por mes</h2>',()=>secT('Resumen del año')+'<div class="cols" style="grid-template-columns:minmax(0,1fr) minmax(0,1fr)"><section class="panel"><div class="panel-h"><h2>Ingresos por mes</h2>');
+  h=h.replace('<div class="cols" style="grid-template-columns:minmax(0,1fr) minmax(0,1fr)"><section class="panel"><div class="panel-h"><h2>Por cobrar este mes</h2>',()=>secT('Detalle de cobros')+'<div class="cols" style="grid-template-columns:minmax(0,1fr) minmax(0,1fr)"><section class="panel"><div class="panel-h"><h2>Por cobrar: este mes y vencido</h2>');
+  return h;
+};
+document.addEventListener('click',e=>{ const b=e.target.closest&&e.target.closest('[data-pp]'); if(b&&$('#app').contains(b)) expenseForm(null,'pendiente',todayS()); });
