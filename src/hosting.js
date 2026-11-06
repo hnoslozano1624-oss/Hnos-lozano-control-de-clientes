@@ -716,3 +716,68 @@ payCard=function(p,c){
   if((p.log||[]).length) h+='<details class="hist"><summary>Historial ('+p.log.length+')</summary><ul>'+p.log.slice().reverse().map(l=>'<li>'+esc(fmtTS(l.at))+' · '+esc(l.text)+'</li>').join('')+'</ul></details>';
   return h+'</article>';
 };
+
+/* ───────── Pagos del cliente: trabajos activos primero; lo ya pagado queda abajo como historial ───────── */
+const _tabPayBase6=tabPay;
+tabPay=function(c,s){
+  let h=_tabPayBase6(c,s);
+  const jobs=jobsOf(c); if(jobs.length<2) return h;
+  const MK='<section class="panel" style="margin-bottom:18px;border-left:4px solid var(--accent)">';
+  const first=h.indexOf(MK); if(first<0) return h;
+  const secs=[]; let pos=first, last=first;
+  for(let i=0;i<jobs.length;i++){ const a=h.indexOf(MK,pos); if(a<0) break; const b=h.indexOf('</section>',a)+10; secs.push([a,b]); pos=b; last=b; }
+  if(secs.length!==jobs.length) return h;
+  const act=[], fin=[];
+  jobs.forEach((j,i)=>{ const html=h.slice(secs[i][0],secs[i][1]); (j.ps.some(p=>!p.received)?act:fin).push({j,html}); });
+  if(!fin.length) return h;
+  const hist=x=>{
+    const j=x.j, rec=j.ps.filter(p=>p.received).sort((a,b)=>(b.receivedDate||'').localeCompare(a.receivedDate||'')), paid=sum(rec,recvAmt), lastD=rec.length?rec[0].receivedDate:'';
+    return '<details class="panel" style="margin-bottom:10px;border-left:4px solid var(--line)"><summary style="cursor:pointer;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap"><span><b>'+esc(jobTitle(j.name))+'</b> <span class="pill ok">Pagado</span> <span class="hint">'+jobMode(j.ps)+' · '+rec.length+' '+plural(rec.length,'cobro','cobros')+(lastD?' · último pago '+fmtD(lastD):'')+'</span></span><span class="num" style="font-weight:800">'+money(paid)+'</span></summary>'
+      +'<div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap"><button class="btn sm" data-act="add-pay" data-job="'+esc(j.name)+'" type="button">+ Agregar pago</button><button class="btn sm" data-act="edit-job" data-job="'+esc(j.name)+'" type="button">Editar trabajo</button></div>'
+      +'<div style="margin-top:10px">'+rec.map(p=>payCard(Object.assign({},p,{label:stripJob(p)}),c)).join('')+'</div></details>';
+  };
+  return h.slice(0,first)+act.map(x=>x.html).join('')+(act.length?'':'<div class="empty">No hay trabajos activos: todo lo pactado está pagado.</div>')
+    +secT('Historial · trabajos pagados')+fin.map(hist).join('')+h.slice(last);
+};
+
+/* ───────── Seguimiento del cliente: tareas pendientes primero; las cumplidas abajo como historial ───────── */
+const _tabSegBase=tabSeg;
+tabSeg=function(c,s){
+  let h=_tabSegBase(c,s);
+  const d=s.ts.filter(t=>t.done).sort((a,b)=>(b.doneAt||'').localeCompare(a.doneAt||''));
+  if(!d.length) return h;
+  return h+secT('Historial · tareas cumplidas')+'<section class="panel" style="opacity:.92"><div class="list">'
+    +d.slice(0,6).map(t=>'<div class="row"><div class="r-main"><div class="r-title" style="font-weight:600">'+esc(t.title)+'</div><div class="r-sub">Cumplida el '+fmtD(t.doneAt)+(t.owner?' · '+esc(t.owner):'')+'</div></div><div class="r-end">'+(supportHTML(t)||'')+'<span class="pill ok">Cumplida</span></div></div>').join('')
+    +'<div class="hint" style="padding-top:8px">'+(d.length>6?'y '+(d.length-6)+' más. ':'')+'El detalle completo con soportes está en la pestaña Ejecutado.</div></div></section>';
+};
+
+/* ───────── Flujo de caja: gráfica de pagos a Laura y a Diego por mes ───────── */
+const mCorto=n=>n>=1e6?(Math.round(n/1e5)/10).toString().replace('.',',')+' M':(n>=1000?Math.round(n/1000)+' mil':String(Math.round(n)));
+function teamChart(year){
+  const L=Array(12).fill(0), D=Array(12).fill(0);
+  S.exps.forEach(e=>{ if(isPend(e)||isIn(e)||!e.date||e.date.slice(0,4)!==year) return; const i=Number(e.date.slice(5,7))-1; if(e.kind==='laura') L[i]+=e.amount; else if(e.kind==='diego') D[i]+=e.amount; });
+  const pend=sum(S.exps.filter(e=>isPend(e)&&(e.kind==='laura'||e.kind==='diego')&&(e.date||'').slice(0,4)===year),e=>e.amount);
+  const tl=sum(L,x=>x), td=sum(D,x=>x), mx=Math.max(1,...L,...D);
+  const step=[1,2,5].map(k=>k*Math.pow(10,Math.floor(Math.log10(mx/4)))).concat([10*Math.pow(10,Math.floor(Math.log10(mx/4)))]).find(s=>s*4>=mx)||mx/4, top=step*4;
+  const W=720, H=250, ml=52, mr=10, mt=14, mb=30, pw=W-ml-mr, ph=H-mt-mb, gw=pw/12, bw=Math.min(20,gw/2-4);
+  const y=v=>mt+ph-(v/top)*ph;
+  let g='';
+  for(let i=0;i<=4;i++){ const v=step*i; g+='<line x1="'+ml+'" x2="'+(W-mr)+'" y1="'+y(v)+'" y2="'+y(v)+'" stroke="var(--line)" stroke-width="1"/><text x="'+(ml-8)+'" y="'+(y(v)+4)+'" text-anchor="end" font-size="11" fill="var(--muted)">'+mCorto(v)+'</text>'; }
+  for(let i=0;i<12;i++){
+    const cx=ml+gw*i+gw/2, nm=MESES[i].charAt(0).toUpperCase()+MESES[i].slice(1,3);
+    g+='<text x="'+cx+'" y="'+(H-10)+'" text-anchor="middle" font-size="11" fill="var(--muted)">'+nm+'</text>';
+    [[L[i],'var(--accent)',-bw-1,'Laura'],[D[i],'var(--info)',1,'Diego']].forEach(([v,col,dx,who])=>{ if(!v) return;
+      g+='<rect x="'+(cx+dx)+'" y="'+y(v)+'" width="'+bw+'" height="'+(y(0)-y(v))+'" rx="3" fill="'+col+'"><title>'+who+' · '+MESES[i]+': '+money(v)+'</title></rect>'
+        +(bw>=14?'<text x="'+(cx+dx+bw/2)+'" y="'+(y(v)-4)+'" text-anchor="middle" font-size="10" font-weight="700" fill="var(--fg)">'+mCorto(v)+'</text>':''); });
+  }
+  const legend=(c,t,v)=>'<span style="display:inline-flex;align-items:center;gap:6px"><span style="width:11px;height:11px;border-radius:3px;background:'+c+';display:inline-block"></span><b>'+t+'</b> '+money(v)+'</span>';
+  return '<section class="panel" style="margin-bottom:22px"><div class="panel-h"><div><h2>Pagos a Laura y a Diego por mes · '+year+'</h2><div class="hint" style="margin-top:3px">Pagos registrados como «Pago a Laura» o «Pago a Diego» y marcados como pagados.</div></div><span class="hint" style="display:flex;gap:16px;flex-wrap:wrap">'+legend('var(--accent)','Laura',tl)+legend('var(--info)','Diego',td)+'</span></div>'
+    +((tl||td)?'<svg viewBox="0 0 '+W+' '+H+'" role="img" aria-label="Pagos a Laura y a Diego por mes en '+year+'" style="width:100%;height:auto;display:block;margin-top:10px">'+g+'</svg>':'<div class="empty" style="margin-top:10px">Aún no hay pagos a Laura o a Diego registrados en '+year+'. Aparecerán aquí cuando registre un movimiento de tipo «Pago a Laura» o «Pago a Diego».</div>')
+    +(pend?'<div class="hint" style="margin-top:8px">Además hay '+money(pend)+' proyectados por pagar a Laura o Diego en '+year+' (no incluidos en la gráfica).</div>':'')+'</section>';
+}
+const _drawCajaBase2=drawCaja;
+drawCaja=function(){
+  const h=_drawCajaBase2(), y=(S.gMonth||todayS().slice(0,7)).slice(0,4);
+  const k=h.search(/<div class="toolbar"><div><h2>(?:Pagos de |Proyección de pagos de )/);
+  return k<0?h:h.slice(0,k)+teamChart(y)+h.slice(k);
+};
