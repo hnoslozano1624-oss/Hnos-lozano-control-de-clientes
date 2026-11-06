@@ -800,6 +800,23 @@ drawCaja=function(){
 };
 document.addEventListener('click',e=>{ const b=e.target.closest&&e.target.closest('[data-act="g-prev"]'); if(!b) return; if((S.gMonth||todayS().slice(0,7))<=firstOpMonth()){ e.stopImmediatePropagation(); e.preventDefault(); toast('La operación inició en '+monthLabel(firstOpMonth())); } },true);
 
+/* cierre de caja mes a mes: el saldo con que cierra cada mes es el saldo inicial del siguiente */
+function cajaMeses(upTo){
+  const {L,open}=ledgerData(), f=firstOpMonth(), rows=[]; let bal=open;
+  for(let y=Number(f.slice(0,4)), mo=Number(f.slice(5,7)); (y+'-'+pad(mo))<=upTo; ){
+    const m=y+'-'+pad(mo), ms=m+'-01', me=ymd(new Date(y,mo,0));
+    const inM=L.filter(x=>x.dir==='in'&&x.date>=ms&&x.date<=me), out=L.filter(x=>x.dir==='out'&&!x.personal&&x.date>=ms&&x.date<=me);
+    const k=n=>sum(out.filter(x=>x.kind===n),x=>x.amount);
+    const r={m,ini:bal,tIn:sum(inM,x=>x.amount),tL:k('laura'),tD:k('diego'),tR:k('reembolso')};
+    r.tC=sum(out,x=>x.amount)-r.tL-r.tD-r.tR; r.fin=r.ini+r.tIn-r.tL-r.tD-r.tR-r.tC;
+    rows.push(r); bal=r.fin; mo++; if(mo>12){ mo=1; y++; }
+  }
+  return rows;
+}
+const origenTxt=(prev,mes,ini)=>prev
+  ? 'El saldo inicial de '+mes+' ('+pdfMoney(ini)+') es el saldo con que cerró '+monthLabel(prev.m)+': saldo inicial '+pdfMoney(prev.ini)+' + entradas '+pdfMoney(prev.tIn)+' - pagos a Laura '+pdfMoney(prev.tL)+' - pagos a Diego '+pdfMoney(prev.tD)+' - compras y otros gastos '+pdfMoney(prev.tC+prev.tR)+' = '+pdfMoney(prev.fin)+'.'
+  : 'Es el primer mes de operación: el saldo inicial es el registrado en el sistema ('+pdfMoney(ini)+').';
+
 /* ───────── Informe mensual de caja en PDF: qué entró, qué salió (compras y pagos a Diego y Laura) y saldo al cierre ───────── */
 async function buildCajaPdf(m){
   const JsPDF=await loadJsPdf(), E=empData(), T=pdfTxt;
@@ -846,6 +863,17 @@ async function buildCajaPdf(m){
   doc.setFillColor(...DARK); doc.roundedRect(M,y,R-M,14,1.5,1.5,'F');
   font('normal',9,[210,210,204]); doc.text('Saldo al cierre de '+T(mes)+' (inicia '+T(mesSig)+')',M+4,y+8.6);
   font('bold',15,GREEN); doc.text(P(fin),R-4,y+9.4,{align:'right'}); y+=21;
+  /* trazabilidad: de dónde viene el saldo inicial */
+  const meses=cajaMeses(m), prev=meses.length>1?meses[meses.length-2]:null;
+  title('De dónde viene el saldo inicial');
+  font('normal',9,GRAY); lines(origenTxt(prev,mes,ini),R-M).forEach(l=>{ need(6); doc.text(l,M,y); y+=4.5; }); y+=3;
+  if(meses.length>1){
+    need(30); doc.setFillColor(...DARK); doc.rect(M,y,R-M,7,'F'); font('bold',7.5,[255,255,255]);
+    doc.text('MES',M+3,y+4.8); doc.text('SALDO INICIAL',78,y+4.8,{align:'right'}); doc.text('ENTRADAS',108,y+4.8,{align:'right'}); doc.text('SALIDAS',140,y+4.8,{align:'right'}); doc.text('SALDO AL CIERRE',R-3,y+4.8,{align:'right'}); y+=7;
+    meses.forEach(r=>{ need(9); font(r.m===m?'bold':'normal',8.6,INK); doc.text(T(monthLabel(r.m)),M+3,y+5.2); doc.text(P(r.ini),78,y+5.2,{align:'right'}); doc.text(P(r.tIn),108,y+5.2,{align:'right'}); doc.text(P(r.tL+r.tD+r.tC+r.tR),140,y+5.2,{align:'right'}); doc.text(P(r.fin),R-3,y+5.2,{align:'right'});
+      y+=8; doc.setDrawColor(...LINE); doc.setLineWidth(0.2); doc.line(M,y,R,y); });
+    y+=8;
+  }
   /* tablas */
   function table(rows,totLabel,tot){
     if(!rows.length){ font('italic',9,GRAY); doc.text('Sin movimientos en el mes.',M+3,y+3); y+=10; return; }
@@ -915,3 +943,19 @@ drawHome=function(){
   return h.replace(t,()=>'<div style="display:flex;justify-content:space-between;align-items:flex-end;gap:12px;flex-wrap:wrap">'+t+'<button class="btn sm" data-informe="1" type="button" style="margin-bottom:10px">Descargar informe de caja (PDF)</button></div>');
 };
 document.addEventListener('click',e=>{ const b=e.target.closest&&e.target.closest('[data-informe]'); if(b&&$('#app').contains(b)) informeForm(); });
+
+/* Flujo de caja en pantalla: cierre mes a mes con la trazabilidad del saldo inicial */
+const _drawCajaBase5=drawCaja;
+drawCaja=function(){
+  const h=_drawCajaBase5(), cm=todayS().slice(0,7), vm=S.gMonth||cm, upTo=vm>cm?vm:cm;
+  const rows=cajaMeses(upTo); if(!rows.length) return h;
+  const mes=monthLabel(vm), cur=rows.find(r=>r.m===vm), prev=rows.find(r=>r.m<vm&&ymd(new Date(Number(r.m.slice(0,4)),Number(r.m.slice(5,7)),1)).slice(0,7)===vm);
+  const nota=prev?'El saldo inicial de '+mes+' ('+money(cur.ini)+') viene del cierre de '+monthLabel(prev.m)+': '+money(prev.ini)+' de saldo inicial + '+money(prev.tIn)+' que entraron - '+money(prev.tL)+' a Laura - '+money(prev.tD)+' a Diego - '+money(prev.tC+prev.tR)+' en compras y otros gastos.':(cur?'Es el primer mes de operación: el saldo inicial es '+money(cur.ini)+'.':'');
+  const tr=rows.slice().reverse().map(r=>'<tr'+(r.m===vm?' style="background:var(--surface-2)"':'')+'><td style="white-space:nowrap"><b>'+esc(monthLabel(r.m))+'</b>'+(r.m===cm?' <span class="hint">(en curso)</span>':'')+'</td><td class="num">'+money(r.ini)+'</td><td class="num">'+money(r.tIn)+'</td><td class="num">'+money(r.tL)+'</td><td class="num">'+money(r.tD)+'</td><td class="num">'+money(r.tC+r.tR)+'</td><td class="num" style="font-weight:800">'+money(r.fin)+'</td></tr>').join('');
+  const panel='<section class="panel" style="margin-bottom:22px"><div class="panel-h"><div><h2>Cierre de caja mes a mes</h2><div class="hint" style="margin-top:3px">El saldo con que cierra cada mes pasa automáticamente como saldo inicial del siguiente.</div></div><button class="btn sm" data-informe="1" type="button">Descargar informe PDF</button></div>'
+    +(nota?'<div class="hint" style="margin:10px 0">'+esc(nota)+'</div>':'')
+    +'<div class="tbl-wrap"><table style="min-width:760px"><thead><tr><th>Mes</th><th>Saldo inicial</th><th>Entradas</th><th>Pagos a Laura</th><th>Pagos a Diego</th><th>Compras y otros</th><th>Saldo al cierre</th></tr></thead><tbody>'+tr+'</tbody></table></div></section>';
+  const MK='<section class="panel" style="margin-bottom:22px"><div class="panel-h"><div><h2>Pagos a Laura y a Diego por mes';
+  const k=h.indexOf(MK);
+  return k<0?h:h.slice(0,k)+panel+h.slice(k);
+};
