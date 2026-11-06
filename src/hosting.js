@@ -696,3 +696,23 @@ tabPay=function(c,s){
   h=h.split('<section class="panel" style="margin-bottom:18px">').join('<section class="panel" style="margin-bottom:18px;border-left:4px solid var(--accent)">');
   return h;
 };
+
+/* ───────── Tarjeta de cada pago: compacta. Si no está registrado como recibido, está pendiente de cobro ───────── */
+payCard=function(p,c){
+  const done=!!p.received, doc=p.docType==='cuenta'?'cuenta de cobro':'factura', t=todayS();
+  const late=!done&&p.dueDate&&dayDiff(p.dueDate,t)<0;
+  const pill=done?'<span class="pill ok">Recibido</span>':(late?'<span class="pill bad">Vencido hace '+(-dayDiff(p.dueDate,t))+' '+plural(-dayDiff(p.dueDate,t),'día','días')+'</span>':'<span class="pill warn">Pendiente de cobro</span>');
+  let h='<article class="pay '+(done?'done':'')+'"><div class="pay-h"><div style="min-width:0"><h3>'+esc(p.label)+'</h3><div class="meta">'+pill+'</div></div><div class="pay-amt num">'+money(p.amount)+'</div></div>';
+  h+='<div class="hint" style="margin:4px 0 12px">'+(done
+    ?'Recibido <b>'+money(recvAmt(p))+'</b> el '+fmtD(p.receivedDate)+(retOf(p)>0?' · retención o diferencia '+money(retOf(p)):'')+(p.receivedNote?' · '+esc(p.receivedNote):'')
+    :'Se factura el '+fmtD(p.billDate)+(p.dueDate?' · pago esperado el '+fmtD(p.dueDate):''))
+    +(p.invoiced?' · '+doc+(p.invoiceNo?' N.º '+esc(p.invoiceNo):' registrada'):'')+'</div>';
+  if(p.invoiced){ const sup=supportHTML({link:p.invoiceLink,fileId:p.invoiceFileId,fileName:p.invoiceFileName,fileType:p.invoiceFileType}); if(sup) h+='<div class="meta" style="margin:-4px 0 10px">'+sup+'</div>'; }
+  h+='<div class="pay-acts">';
+  if(!done) h+='<button class="btn sm pri" data-act="receive" data-id="'+esc(p.id)+'" type="button">Registrar pago recibido</button>';
+  else h+='<button class="link" data-act="unreceive" data-id="'+esc(p.id)+'" type="button">Marcar como no recibido</button>';
+  h+='<button class="link" data-act="invoice" data-id="'+esc(p.id)+'" type="button">'+(p.invoiced?'Editar '+doc:'Registrar factura o cuenta de cobro (opcional)')+'</button>';
+  h+='<button class="link" data-act="edit-pay" data-id="'+esc(p.id)+'" type="button">Editar pago</button></div>';
+  if((p.log||[]).length) h+='<details class="hist"><summary>Historial ('+p.log.length+')</summary><ul>'+p.log.slice().reverse().map(l=>'<li>'+esc(fmtTS(l.at))+' · '+esc(l.text)+'</li>').join('')+'</ul></details>';
+  return h+'</article>';
+};
