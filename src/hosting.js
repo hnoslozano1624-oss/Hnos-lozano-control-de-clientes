@@ -601,6 +601,7 @@ function rollMonthly(){
       ps.sort((a,b)=>a.billDate.localeCompare(b.billDate));
       const last=ps[ps.length-1], lm=ab(last.billDate);
       if(lm<cur-1||lm>=nx) return;      /* contrato sin movimiento reciente, o ya programado */
+      if(ps.some(p=>Date.now()-Date.parse(p.createdAt||0)<180000)) return;   /* trabajo recién creado: sus meses aún se están guardando */
       const day=Number(last.billDate.slice(8,10)), term=Math.max(0,dayDiff(last.dueDate||last.billDate,last.billDate));
       for(let k=lm+1;k<=nx;k++){
         const y=Math.floor((k-1)/12), m=((k-1)%12)+1, key=c.id+'|'+job+'|'+y+'-'+pad(m);
