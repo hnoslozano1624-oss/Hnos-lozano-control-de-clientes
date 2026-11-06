@@ -662,3 +662,37 @@ drawHome=function(){
   return h;
 };
 document.addEventListener('click',e=>{ const b=e.target.closest&&e.target.closest('[data-pp]'); if(b&&$('#app').contains(b)) expenseForm(null,'pendiente',todayS()); });
+
+/* ───────── Pestaña Pagos del cliente: cifras claras (pago inicial, mensualidad, cobros recibidos, por cobrar) ───────── */
+const recvAmt=p=>p.receivedAmount!=null?p.receivedAmount:p.amount;
+const lastOf=ps=>ps.slice().sort((a,b)=>(a.billDate||'').localeCompare(b.billDate||'')).pop();
+const unrecv=ps=>sum(ps.filter(p=>!p.received),p=>p.amount);
+function jobSum(j){
+  const men=j.ps.some(p=>p.kind==='mensual'), rec=j.ps.filter(p=>p.received), pen=j.ps.filter(p=>!p.received), paid=sum(rec,recvAmt), por=unrecv(j.ps);
+  let a;
+  if(men){ const l=lastOf(j.ps), d=Number(l.billDate.slice(8,10)), v=l.dueDate?Number(l.dueDate.slice(8,10)):0;
+    a=stat('Mensualidad acordada',money(l.amount),'Cada mes · se factura el día '+d+(v&&v!==d?' y se paga hasta el '+v:''),''); }
+  else a=stat('Valor acordado',money(sum(j.ps,p=>p.amount)),j.ps.length>1?j.ps.length+' pagos (anticipo y saldo)':'Pago único','');
+  return '<div class="pay-sum p3">'+a+stat('Cobros recibidos',money(paid),rec.length+' '+plural(rec.length,'cobro recibido','cobros recibidos'),'good')+stat('Por cobrar',money(por),por?pen.length+' '+plural(pen.length,'cobro pendiente','cobros pendientes'):'Al día',por?'warm':'')+'</div>'
+    +'<div class="hint" style="font-weight:800;text-transform:uppercase;letter-spacing:.08em;font-size:11px;margin:6px 0 10px">Cobros pendientes</div>';
+}
+const _tabPayBase4=tabPay;
+tabPay=function(c,s){
+  let h=_tabPayBase4(c,s);
+  const jobs=jobsOf(c), mon=jobs.filter(j=>j.ps.some(p=>p.kind==='mensual')), one=jobs.filter(j=>!j.ps.some(p=>p.kind==='mensual'));
+  const ini=sum(one,j=>sum(j.ps,p=>p.amount)), mens=sum(mon,j=>lastOf(j.ps).amount);
+  const rec=s.ps.filter(p=>p.received), pen=s.ps.filter(p=>!p.received), por=unrecv(s.ps), atras=sum(pen.filter(p=>p.billDate<monthStart()),p=>p.amount);
+  const cards=[];
+  if(one.length) cards.push(stat('Pago inicial acordado',money(ini),one.length===1?one[0].name||'Trabajo principal':one.length+' trabajos',''));
+  if(mon.length) cards.push(stat('Mensualidad acordada',money(mens),mon.length===1?(mon[0].name||'Pago mensual')+' · cada mes':'Suma de '+mon.length+' trabajos mensuales',''));
+  cards.push(stat('Cobros recibidos',money(sum(rec,recvAmt)),rec.length+' '+plural(rec.length,'cobro recibido','cobros recibidos'),'good'));
+  cards.push(stat('Cuentas por cobrar',money(por),por?pen.length+' '+plural(pen.length,'cobro pendiente','cobros pendientes')+(atras?' · '+money(atras)+' vencido':''):'Todo al día',atras?'hot':(por?'warm':'')));
+  const top='<div class="pay-sum" style="grid-template-columns:repeat('+cards.length+',minmax(0,1fr))">'+cards.join('')+'</div>';
+  h=h.replace(/<div class="pay-sum">(?:<div class="stat [^"]*"><div class="k">[^<]*<\/div><div class="v num">[^<]*<\/div><div class="s">[^<]*<\/div><\/div>){4}<\/div>/,()=>secT('Resumen de pagos').replace('margin:26px 0 10px','margin:2px 0 10px')+top);
+  let i=0;
+  h=h.replace(/<div class="pay-sum p3">(?:<div class="stat [^"]*"><div class="k">[^<]*<\/div><div class="v num">[^<]*<\/div><div class="s">[^<]*<\/div><\/div>){3}<\/div>/g,m=>jobs[i]?jobSum(jobs[i++]):m);
+  h=h.split('<button class="btn sm" data-otro="new" type="button">Registrar pago de otro concepto</button><button class="btn sm pri" data-act="new-job" type="button">+ Nuevo trabajo</button></div>').join('<span style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn sm" data-otro="new" type="button">Registrar pago de otro concepto</button><button class="btn sm pri" data-act="new-job" type="button">+ Nuevo trabajo</button></span></div>');
+  h=h.replace(/<div class="hint">(Pago mensual|Abonos|Pago único) · (\d+) pagos?<\/div>/g,(m,t)=>'<div style="margin-top:4px"><span class="pill '+(t==='Pago mensual'?'ok':'info')+'">'+t+'</span></div>');
+  h=h.split('<section class="panel" style="margin-bottom:18px">').join('<section class="panel" style="margin-bottom:18px;border-left:4px solid var(--accent)">');
+  return h;
+};
