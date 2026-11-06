@@ -500,3 +500,60 @@ receiveForm=function(p){
         toast('Pago registrado: ya no está por cobrar y entró a caja por '+money(v));
       } }}]});
 };
+
+/* ───────── Pagos de otro concepto (no programados): fecha, concepto, valor y destino del dinero ───────── */
+const otrosOf=c=>S.exps.filter(e=>e.kind==='ingreso'&&e.clientId===c.id&&e.status!=='pendiente').sort((a,b)=>(b.date||'').localeCompare(a.date||''));
+const destTxt=s=>s==='laura'?'Bolsillo de Laura':(s==='diego'?'Bolsillo de Diego':'Flujo de caja D&L');
+function otroForm(c,e){
+  const o=e||{date:todayS(),concept:'',amount:0,source:'caja',note:''};
+  openModal({title:e?'Editar pago de otro concepto':'Registrar pago de otro concepto · '+c.name,
+    body:'<p class="hint" style="margin:0">Para dinero que entra de este cliente y no estaba programado (por ejemplo un ajuste, un trabajo adicional o un reembolso). No requiere factura ni cuenta de cobro.</p>'
+     +'<div class="f2"><div class="fld"><label for="ot-date">Fecha en que entró</label><input class="inp" id="ot-date" type="date" value="'+esc(o.date||todayS())+'"></div><div class="fld"><label for="ot-amt">Valor que entró (COP)</label><input class="inp num" id="ot-amt" inputmode="numeric" value="'+(o.amount?grp(o.amount):'')+'"></div></div>'
+     +'<div class="fld"><label for="ot-con">Concepto</label><input class="inp" id="ot-con" placeholder="Ej. Ajuste de diseño, trabajo adicional, reembolso de pauta" value="'+esc(o.concept||'')+'"></div>'
+     +'<div class="fld" style="max-width:420px"><label for="ot-src">A dónde entró</label><select class="inp" id="ot-src">'+srcOpts(o.source||'caja')+'</select><span class="hint">Si entró al bolsillo de Laura o de Diego, queda registrado pero no suma al Flujo de caja de D&L.</span></div>'
+     +'<div class="fld"><label for="ot-note">Nota (opcional)</label><input class="inp" id="ot-note" placeholder="Ej. Transferencia Bancolombia" value="'+esc(o.note||'')+'"></div>',
+    onMount:()=>{ $('#ot-amt').addEventListener('change',ev=>{ ev.target.value=grp(num(ev.target.value)); }); },
+    actions:[...(e?[{label:'Eliminar',kind:'danger',fn:async()=>{ await delDoc('expenses',e.id); toast('Pago eliminado'); }}]:[]),{label:'Cancelar',fn:()=>true},{label:'Guardar',kind:'pri',fn:async()=>{
+      const amount=num($('#ot-amt').value), concept=$('#ot-con').value.trim();
+      if(!(amount>0)){ toast('Indique el valor que entró.'); return false; }
+      if(!concept){ toast('Indique el concepto del pago.'); return false; }
+      const data={kind:'ingreso',status:'pagado',clientId:c.id,amount,concept,payee:'',cat:'',rec:false,link:'',socio:'',date:$('#ot-date').value||todayS(),source:$('#ot-src').value,note:$('#ot-note').value.trim()};
+      if(e) await patchDoc('expenses',e.id,data); else await saveDoc('expenses',null,Object.assign({createdAt:new Date().toISOString()},data));
+      toast(data.source==='caja'?'Pago registrado: entró al Flujo de caja por '+money(amount):'Pago registrado en el '+destTxt(data.source).toLowerCase()+' (no suma a la caja de D&L)'); }}]});
+}
+const _tabPayBase2=tabPay;
+tabPay=function(c,s){
+  let h=_tabPayBase2(c,s);
+  h=h.split('<button class="btn sm pri" data-act="new-job" type="button">+ Nuevo trabajo</button>').join('<button class="btn sm" data-otro="new" type="button">Registrar pago de otro concepto</button><button class="btn sm pri" data-act="new-job" type="button">+ Nuevo trabajo</button>');
+  const os=otrosOf(c);
+  if(os.length){
+    h+='<section class="panel" style="margin-top:18px"><div class="panel-h"><h2>Pagos de otros conceptos</h2><span class="hint">'+os.length+' '+plural(os.length,'pago','pagos')+' · '+money(sum(os,x=>x.amount))+'</span></div>'
+     +'<div class="tbl-wrap"><table><thead><tr><th>Fecha</th><th>Concepto</th><th>A dónde entró</th><th>Valor</th><th></th></tr></thead><tbody>'
+     +os.map(x=>'<tr><td class="num" style="white-space:nowrap">'+fmtD(x.date)+'</td><td style="min-width:200px">'+esc(x.concept||'—')+(x.note?'<div class="r-sub">'+esc(x.note)+'</div>':'')+'</td><td>'+esc(destTxt(x.source))+'</td><td class="num" style="font-weight:700">'+money(x.amount)+'</td><td style="text-align:right"><button class="link" data-otro="edit" data-id="'+esc(x.id)+'" type="button">Editar</button></td></tr>').join('')
+     +'</tbody></table></div></section>';
+  }
+  return h;
+};
+document.addEventListener('click',e=>{
+  const b=e.target.closest&&e.target.closest('[data-otro]'); if(!b||!$('#app').contains(b)) return;
+  if(b.dataset.otro==='new'){ const c=clientById(S.cid); if(c) otroForm(c); }
+  else { const x=S.exps.find(y=>y.id===b.dataset.id), c=x&&clientById(x.clientId); if(x&&c) otroForm(c,x); }
+});
+
+/* los pagos de otro concepto que entran al bolsillo de un socio se muestran en el libro, pero no suman a la caja de D&L */
+const _ledgerBase=ledgerData;
+ledgerData=function(){
+  const r=_ledgerBase(), st=S.caja||{}, from=st.fecha||'';
+  let bal=Number(st.saldo)||0;
+  r.L.forEach(x=>{
+    if(x.ref==='e'&&x.dir==='in'&&(x.src==='laura'||x.src==='diego')){ x.personal=x.src; x.dir='pin'; x.concept+=' · '+money(x.amount)+' entraron al bolsillo de '+(x.src==='laura'?'Laura':'Diego'); }
+    if(x.date>=from){ if(!x.personal) bal+=x.dir==='in'?x.amount:-x.amount; x.bal=bal; } else x.bal=null;
+  });
+  return r;
+};
+/* editar una entrada desde el Flujo de caja conserva (y permite cambiar) a dónde entró */
+const _expenseFormBase=expenseForm;
+expenseForm=function(e,defStatus,defDate,preset){
+  if(e&&e.kind==='ingreso'){ const c=e.clientId?clientById(e.clientId):null; if(c) return otroForm(c,e); }
+  return _expenseFormBase(e,defStatus,defDate,preset);
+};
