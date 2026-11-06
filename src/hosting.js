@@ -444,3 +444,59 @@ mailBill=async function(b){
   window.location.href='mailto:'+encodeURIComponent(b.cEmail||'')+'?subject='+encodeURIComponent(subj)+'&body='+encodeURIComponent(body);
   toast('Se abrió el correo: adjunte el PDF que se acaba de descargar.');
 };
+
+/* ───────── Pagos: registrar directamente lo que entró (sin factura ni cuenta de cobro) y retenciones ───────── */
+const retOf=p=>p.received?(Number(p.retention)||0):0;
+const _statsBase=stats;
+stats=function(c){
+  const s=_statsBase(c), r=sum(s.ps,retOf);
+  if(r){ s.ret=r; s.saldo=Math.max(0,s.total-s.paid-r); }
+  return s;
+};
+const _jobStatsBase=jobStats;
+jobStats=function(ps){
+  const s=_jobStatsBase(ps), r=sum(ps,retOf);
+  if(r){ s.ret=r; s.saldo=Math.max(0,s.total-s.paid-r); }
+  return s;
+};
+const _payCardBase=payCard;
+payCard=function(p,c){
+  let h=_payCardBase(p,c);
+  /* la factura o cuenta de cobro es opcional */
+  h=h.replace(/<div class="step[^"]*"><span class="dot"><\/span><div><div class="t">Falta emitir factura o cuenta de cobro<\/div><div class="d">[^<]*<\/div><\/div><\/div>/,()=>p.received?'':'<div class="step"><span class="dot"></span><div><div class="t">Sin factura ni cuenta de cobro</div><div class="d">Es opcional: puede registrar el pago directamente</div></div></div>');
+  if(!p.received){
+    h=h.replace(/<button class="recv" data-act="receive"[\s\S]*?<\/button>/,()=>'<button class="btn sm pri" data-act="receive" data-id="'+esc(p.id)+'" type="button">Registrar pago recibido</button>');
+    h=h.replace('<button class="btn sm pri" data-act="invoice"','<button class="btn sm" data-act="invoice"').replace('>Registrar factura o cuenta de cobro</button>','>Registrar factura o cuenta de cobro (opcional)</button>');
+  } else if(retOf(p)>0){
+    h=h.replace(/(Dinero recibido · [^<]*)(<\/div>)/,(m,a,b)=>a+' · retención o diferencia '+esc(money(retOf(p)))+b);
+  }
+  return h;
+};
+receiveForm=function(p){
+  const sched=Number(p.amount)||0;
+  openModal({title:'Registrar pago recibido',
+    body:'<p style="margin:0;font-weight:600">'+esc(p.label)+(p.invoiced?' · '+(p.docType==='cuenta'?'cuenta de cobro ':'factura ')+(p.invoiceNo?'N.º '+esc(p.invoiceNo):'registrada'):'')+'</p>'
+     +'<p class="hint" style="margin:0">Valor programado: <b>'+money(sched)+'</b>. Escriba el valor exacto que entró a la cuenta; no necesita factura ni cuenta de cobro.</p>'
+     +'<div class="f2"><div class="fld"><label for="rc-date">Fecha en que ingresó</label><input class="inp" id="rc-date" type="date" value="'+todayS()+'"></div><div class="fld"><label for="rc-amt">Valor que entró (COP)</label><input class="inp num" id="rc-amt" inputmode="numeric" value="'+grp(sched)+'"></div></div>'
+     +'<div id="rc-diff" class="hint" style="margin:0"></div>'
+     +'<div class="fld" id="rc-mode-f" style="display:none"><label for="rc-mode">La diferencia corresponde a</label><select class="inp" id="rc-mode"><option value="ret">Retención (el cobro queda completo)</option><option value="part">Pago parcial (el resto queda pendiente)</option></select></div>'
+     +'<div class="fld"><label for="rc-note">Nota (opcional)</label><input class="inp" id="rc-note" placeholder="Ej. Retención en la fuente, transferencia Bancolombia"></div>'
+     +'<p class="hint" style="margin:0">Al confirmar, este cobro deja de estar por cobrar y entra al Flujo de caja como ingreso por el valor exacto recibido, en el mes de la fecha de ingreso.</p>',
+    onMount:()=>{
+      const amt=$('#rc-amt'), diff=$('#rc-diff'), mf=$('#rc-mode-f');
+      const upd=()=>{ const v=num(amt.value), d=sched-v; mf.style.display=d>0?'':'none';
+        diff.textContent=d>0?'Diferencia frente a lo programado: '+money(d):(d<0?'Entró '+money(-d)+' más de lo programado.':'Entró el valor completo.'); };
+      amt.addEventListener('input',upd); amt.addEventListener('change',e=>{ e.target.value=grp(num(e.target.value)); upd(); }); upd(); },
+    actions:[{label:'Cancelar',fn:()=>true},{label:'Registrar pago',kind:'pri',fn:async()=>{
+      const v=num($('#rc-amt').value), date=$('#rc-date').value||todayS(), note=$('#rc-note').value.trim(), diff=sched-v, mode=$('#rc-mode').value;
+      if(!(v>0)){ toast('Indique el valor que entró.'); return false; }
+      const base={received:true,receivedDate:date,receivedAmount:v,receivedNote:note};
+      if(diff>0&&mode==='part'){
+        await saveDoc('payments',null,{clientId:p.clientId,kind:p.kind,job:p.job||'',label:p.label+' (saldo pendiente)',amount:diff,billDate:p.billDate,dueDate:p.dueDate||p.billDate,invoiced:false,received:false,seq:(p.seq||0)+0.5,createdAt:new Date().toISOString(),log:[{at:new Date().toISOString(),text:'Saldo pendiente de un pago parcial de '+money(v)}]});
+        await patchDoc('payments',p.id,Object.assign(base,{amount:v,retention:0,log:logEntry(p,'Pago parcial recibido · '+money(v)+' · quedan '+money(diff)+' pendientes')}));
+        toast('Pago parcial registrado; el saldo de '+money(diff)+' quedó pendiente');
+      } else {
+        await patchDoc('payments',p.id,Object.assign(base,{retention:diff>0?diff:0,log:logEntry(p,'Pago recibido · '+money(v)+(diff>0?' (retención o diferencia '+money(diff)+')':''))}));
+        toast('Pago registrado: ya no está por cobrar y entró a caja por '+money(v));
+      } }}]});
+};
