@@ -100,9 +100,13 @@ drawHome=function(){
     +(al.length>6?'<div class="hint" style="padding-top:8px">y '+(al.length-6)+' más en el panel de Hosting y dominio.</div>':'')+'</div></section>';
   return h+p;
 };
+/* proyección: de los clientes mensuales solo se ve lo pendiente hasta el fin del mes siguiente;
+   lo programado más adelante sigue guardado y aparece cuando llegue su mes */
+const payHidden=p=>!p.received&&p.kind==='mensual'&&(p.billDate||'')>horizonEnd();
 const _drawBase2=draw;
 draw=function(){
-  _drawBase2();
+  const all=S.pays; S.pays=all.filter(p=>!payHidden(p));
+  try{ _drawBase2(); } finally{ S.pays=all; }
 };
 
 /* flujo de caja: la "caja proyectada al cierre" pasa a ser lo que los clientes deben pagar en el mes,
@@ -178,19 +182,27 @@ function horizonEnd(){ const q=todayS().split('-').map(Number); return ymd(new D
 function cxcAll(){
   return S.pays.filter(p=>{ const c=clientById(p.clientId); return c&&c.status!=='cerrado'&&!p.received; });
 }
-function cxcRows(){ const he=horizonEnd(); return cxcAll().filter(p=>(p.billDate||'')<=he); }
-function cxcDetail(){
-  const rows=cxcRows(), total=sum(rows,p=>p.amount), by=new Map();
+function monthSpan(){ const t=todayS(), q=t.split('-').map(Number); return {ms:t.slice(0,7)+'-01', me:ymd(new Date(q[0],q[1],0))}; }
+const MESES=['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+/* Cuentas por cobrar del Panel general: solo lo pendiente del mes actual (lo vencido de meses anteriores se informa aparte) */
+function cxcRows(){ const m=monthSpan(); return cxcAll().filter(p=>(p.billDate||'')>=m.ms&&(p.billDate||'')<=m.me); }
+function cxcPrev(){ const m=monthSpan(); return cxcAll().filter(p=>(p.billDate||'')<m.ms); }
+function cxcTable(rows,totalLabel){
+  const total=sum(rows,p=>p.amount), by=new Map();
   rows.forEach(p=>{ if(!by.has(p.clientId)) by.set(p.clientId,[]); by.get(p.clientId).push(p); });
   const groups=[...by.entries()].map(([id,ps])=>({c:clientById(id),ps:ps.sort((a,b)=>(a.billDate||'').localeCompare(b.billDate||'')),sub:sum(ps,p=>p.amount)})).sort((a,b)=>b.sub-a.sub);
-  let b='<p class="hint" style="margin:0">Cobros pendientes de los clientes activos hasta el fin del mes siguiente (lo programado más adelante no se suma). El total coincide con la cifra del Panel general ('+rows.length+' '+plural(rows.length,'cobro','cobros')+', '+groups.length+' '+plural(groups.length,'cliente','clientes')+').</p>';
-  if(!rows.length) return b+'<div class="empty">No hay cobros pendientes.</div>';
-  b+='<div class="tbl-wrap"><table style="min-width:640px"><thead><tr><th>Concepto</th><th>Facturar</th><th>Pago esperado</th><th>Estado</th><th>Valor</th></tr></thead><tbody>';
+  let b='<div class="tbl-wrap"><table style="min-width:640px"><thead><tr><th>Concepto</th><th>Facturar</th><th>Pago esperado</th><th>Estado</th><th>Valor</th></tr></thead><tbody>';
   groups.forEach(g=>{
     b+='<tr style="background:var(--surface-2)"><td colspan="4"><b>'+esc(g.c.name)+'</b> <button class="link" type="button" data-cxc-open="'+esc(g.c.id)+'">Ver pagos del cliente</button></td><td class="num" style="font-weight:800">'+money(g.sub)+'</td></tr>';
     g.ps.forEach(p=>{ b+='<tr><td style="min-width:200px">'+esc(p.label)+'</td><td class="num" style="white-space:nowrap">'+fmtD(p.billDate)+'</td><td class="num" style="white-space:nowrap">'+fmtD(p.dueDate)+'</td><td>'+payPill(p,g.c)+'</td><td class="num">'+money(p.amount)+'</td></tr>'; });
   });
-  b+='<tr style="background:var(--surface-2)"><td colspan="4" style="font-weight:800">Total por cobrar</td><td class="num" style="font-weight:800">'+money(total)+'</td></tr></tbody></table></div>';
+  return b+'<tr style="background:var(--surface-2)"><td colspan="4" style="font-weight:800">'+totalLabel+'</td><td class="num" style="font-weight:800">'+money(total)+'</td></tr></tbody></table></div>';
+}
+function cxcDetail(){
+  const rows=cxcRows(), prev=cxcPrev(), mes=MESES[Number(todayS().slice(5,7))-1];
+  let b='<p class="hint" style="margin:0">Cobros pendientes de los clientes activos que corresponden a '+mes+' ('+rows.length+' '+plural(rows.length,'cobro','cobros')+'). El total coincide con la cifra del Panel general.</p>';
+  b+=rows.length?cxcTable(rows,'Total por cobrar de '+mes):'<div class="empty">No hay cobros pendientes este mes.</div>';
+  if(prev.length) b+='<h3 style="margin:18px 0 6px">Vencido de meses anteriores</h3><p class="hint" style="margin:0 0 8px">Estos cobros no están sumados en la cifra del Panel general; siguen pendientes de pago.</p>'+cxcTable(prev,'Total vencido de meses anteriores');
   return b;
 }
 function cxcOpen(){
@@ -202,8 +214,8 @@ const _drawHomeBase2=drawHome;
 drawHome=function(){
   const h=_drawHomeBase2();
   return h.replace(/<div class="stat ([^"]*)"><div class="k">Cuentas por cobrar<\/div>[\s\S]*?<div class="s">[^<]*<\/div><\/div>/,()=>{
-    const rows=cxcRows(), tot=sum(rows,p=>p.amount), ms=todayS().slice(0,7)+'-01', atras=sum(rows.filter(p=>(p.billDate||'')<ms),p=>p.amount), lejos=cxcAll().length-rows.length;
-    const sub=rows.length+' '+plural(rows.length,'cobro','cobros')+' hasta el mes siguiente'+(atras?' · incluye '+money(atras)+' vencido':'')+' · clic para ver el detalle';
+    const rows=cxcRows(), tot=sum(rows,p=>p.amount), prev=sum(cxcPrev(),p=>p.amount), mes=MESES[Number(todayS().slice(5,7))-1];
+    const sub='Pendiente de '+mes+' · '+rows.length+' '+plural(rows.length,'cobro','cobros')+(prev?' · aparte: '+money(prev)+' vencido de meses anteriores':'')+' · clic para ver el detalle';
     return stat('Cuentas por cobrar',money(tot),sub,tot?'warm':'').replace(/^<div /,'<div data-cxc="1" role="button" tabindex="0" style="cursor:pointer" ');
   });
 };
