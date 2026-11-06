@@ -557,3 +557,61 @@ expenseForm=function(e,defStatus,defDate,preset){
   if(e&&e.kind==='ingreso'){ const c=e.clientId?clientById(e.clientId):null; if(c) return otroForm(c,e); }
   return _expenseFormBase(e,defStatus,defDate,preset);
 };
+
+/* ───────── Pago mensual: siempre se factura el día 1 y el pago se espera hasta el día 5 de cada mes ───────── */
+const _jobFormBase=jobForm;
+jobForm=function(c){ _jobFormBase(c); if(JB){ JB.billDay=1; JB.term=4; } };
+const fixMonthly=()=>{
+  [['jb-day','jb-term'],['pf-day','pf-term']].forEach(([a,b])=>{
+    const d=document.getElementById(a), t=document.getElementById(b); if(!d||!t||d.dataset.fx) return; d.dataset.fx='1';
+    const set=(el,v)=>{ el.value=v; el.dispatchEvent(new Event('input',{bubbles:true})); };
+    set(d,1); set(t,4);
+    const fd=d.closest('.fld'), ft=t.closest('.fld'); if(!fd||!ft) return;
+    fd.style.display='none'; ft.style.display='none';
+    const n=document.createElement('div'); n.className='fld';
+    n.innerHTML='<span class="lab">Fechas de cada mes</span><div class="hint">Se factura el día 1 y el pago se espera del 1 al 5 de cada mes. Se programa hasta el mes siguiente y el sistema agrega cada mes automáticamente.</div>';
+    fd.parentNode.insertBefore(n,fd);
+  });
+  [['jb-months','jb-first'],['pf-months','pf-first']].forEach(([a,b])=>{
+    const m=document.getElementById(a), f=document.getElementById(b); if(!m||!f||m.dataset.fx) return; m.dataset.fx='1';
+    const mf=m.closest('.fld'); if(mf) mf.style.display='none';
+    monthsAuto(m,f);
+  });
+};
+/* meses a programar: desde el primer mes hasta el mes siguiente al actual (mínimo uno) */
+function monthsAuto(m,f){
+  const q=todayS().split('-').map(Number), nx=q[0]*12+q[1], fm=(f.value||'').split('-').map(Number);
+  const n=fm.length>1&&fm[0]?Math.min(36,Math.max(1,nx-(fm[0]*12+(fm[1]-1))+1-0)):1;
+  m.value=Math.max(1,n); m.dispatchEvent(new Event('input',{bubbles:true}));
+}
+document.addEventListener('input',e=>{
+  const t=e.target; if(!t||(t.id!=='jb-first'&&t.id!=='pf-first')) return;
+  const m=document.getElementById(t.id==='jb-first'?'jb-months':'pf-months'); if(m) monthsAuto(m,t);
+});
+/* cada trabajo mensual activo siempre tiene programado el mes siguiente: se agrega solo al cambiar de mes */
+const rollBusy=new Set();
+function rollMonthly(){
+  if(!S.db||!S.loaded||!S.loaded.c||!S.loaded.p) return;
+  const q=todayS().split('-').map(Number), nx=q[0]*12+q[1]+1, cur=q[0]*12+q[1];   /* meses absolutos (mes 1-12) */
+  const ab=b=>{ const x=b.split('-').map(Number); return x[0]*12+x[1]; };
+  S.clients.filter(c=>c.status!=='cerrado').forEach(c=>{
+    const by=new Map();
+    paysOf(c.id).filter(p=>p.kind==='mensual'&&p.billDate).forEach(p=>{ const j=jobOf(p); if(!by.has(j)) by.set(j,[]); by.get(j).push(p); });
+    by.forEach((ps,job)=>{
+      ps.sort((a,b)=>a.billDate.localeCompare(b.billDate));
+      const last=ps[ps.length-1], lm=ab(last.billDate);
+      if(lm<cur-1||lm>=nx) return;      /* contrato sin movimiento reciente, o ya programado */
+      const day=Number(last.billDate.slice(8,10)), term=Math.max(0,dayDiff(last.dueDate||last.billDate,last.billDate));
+      for(let k=lm+1;k<=nx;k++){
+        const y=Math.floor((k-1)/12), m=((k-1)%12)+1, key=c.id+'|'+job+'|'+y+'-'+pad(m);
+        if(rollBusy.has(key)||ps.some(p=>ab(p.billDate)===k)) continue;
+        rollBusy.add(key);
+        const bill=y+'-'+pad(m)+'-'+pad(Math.min(day,new Date(y,m,0).getDate())), now=new Date().toISOString();
+        saveDoc('payments',null,{clientId:c.id,kind:'mensual',job,label:jobLabel(job,'Mensualidad '+monthName(y,m)),amount:last.amount,billDate:bill,dueDate:addDays(bill,term),invoiced:false,received:false,seq:paysOf(c.id).length+1,createdAt:now,log:[{at:now,text:'Mes programado automáticamente'}]}).catch(()=>rollBusy.delete(key));
+      }
+    });
+  });
+}
+const _drawBase3=draw;
+draw=function(){ _drawBase3(); try{ rollMonthly(); }catch(e){} };
+new MutationObserver(fixMonthly).observe(document.body,{childList:true,subtree:true});
