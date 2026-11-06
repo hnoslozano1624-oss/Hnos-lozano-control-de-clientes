@@ -799,3 +799,119 @@ drawCaja=function(){
   return h;
 };
 document.addEventListener('click',e=>{ const b=e.target.closest&&e.target.closest('[data-act="g-prev"]'); if(!b) return; if((S.gMonth||todayS().slice(0,7))<=firstOpMonth()){ e.stopImmediatePropagation(); e.preventDefault(); toast('La operación inició en '+monthLabel(firstOpMonth())); } },true);
+
+/* ───────── Informe mensual de caja en PDF: qué entró, qué salió (compras y pagos a Diego y Laura) y saldo al cierre ───────── */
+async function buildCajaPdf(m){
+  const JsPDF=await loadJsPdf(), E=empData(), T=pdfTxt;
+  const doc=new JsPDF({unit:'mm',format:'a4'}), W=210, H=297, M=14, R=W-M, LIM=H-22;
+  const DARK=[26,20,18], GREEN=[126,211,33], GD=[62,142,15], GRAY=[100,100,96], INK=[30,26,24], LINE=[222,222,216], SOFT=[243,246,236];
+  const lg=await imgDims(LOGO_H), P=n=>pdfMoney(n);
+  const col=c=>doc.setTextColor(c[0],c[1],c[2]);
+  const font=(st,sz,c)=>{ doc.setFont('helvetica',st); doc.setFontSize(sz); col(c||INK); };
+  const lines=(t,w)=>doc.splitTextToSize(T(t),w);
+  const dmy=s=>s?s.slice(8,10)+'/'+s.slice(5,7)+'/'+s.slice(0,4):'';
+  const q=m.split('-').map(Number), ms=m+'-01', me=ymd(new Date(q[0],q[1],0)), mes=monthLabel(m);
+  const nx=ymd(new Date(q[0],q[1],1)).slice(0,7), mesSig=monthLabel(nx);
+  const {L,open}=ledgerData();
+  let ini=open; L.forEach(x=>{ if(x.bal!=null&&x.date<ms) ini=x.bal; });
+  const inM=L.filter(x=>x.dir==='in'&&x.date>=ms&&x.date<=me), outAll=L.filter(x=>x.dir==='out'&&x.date>=ms&&x.date<=me);
+  const out=outAll.filter(x=>!x.personal), pers=outAll.filter(x=>x.personal);
+  const gL=out.filter(x=>x.kind==='laura'), gD=out.filter(x=>x.kind==='diego'), gR=out.filter(x=>x.kind==='reembolso'), gC=out.filter(x=>x.kind!=='laura'&&x.kind!=='diego'&&x.kind!=='reembolso');
+  const tIn=sum(inM,x=>x.amount), tL=sum(gL,x=>x.amount), tD=sum(gD,x=>x.amount), tR=sum(gR,x=>x.amount), tC=sum(gC,x=>x.amount);
+  const tOut=tL+tD+tR+tC, fin=ini+tIn-tOut;
+  const cn=x=>{ const c=x.clientId?clientById(x.clientId):null; return c?c.name:''; };
+  const detOut=x=>{ const base=(x.concept&&x.concept!==x.type)?x.type+' · '+x.concept:x.type; const c=cn(x); return base+(c?' · Cliente: '+c:''); };
+  function band(first){
+    const bh=first?40:20;
+    doc.setFillColor(...DARK); doc.rect(0,0,W,bh,'F');
+    [[155,230,53],[109,194,26],[62,142,15]].forEach((c,i)=>{ doc.setFillColor(c[0],c[1],c[2]); doc.rect(i*W/3,bh,W/3+0.3,1.4,'F'); });
+    const lh=first?24:11, lw=lh*lg.w/lg.h; doc.addImage(LOGO_H,'PNG',M,(bh-lh)/2,lw,lh);
+    if(first){ font('bolditalic',19,GREEN); doc.text('INFORME DE CAJA',R,16,{align:'right'}); font('bold',13,[255,255,255]); doc.text(T(mes.charAt(0).toUpperCase()+mes.slice(1)),R,25,{align:'right'}); font('normal',9,[210,210,204]); doc.text('Del '+dmy(ms)+' al '+dmy(me),R,32,{align:'right'}); }
+    else { font('bolditalic',11,GREEN); doc.text('Informe de caja · '+T(mes),R,12.5,{align:'right'}); }
+    return first?52:30;
+  }
+  let y=band(true);
+  const need=h=>{ if(y+h>LIM){ doc.addPage(); y=band(false)+2; } };
+  const title=t=>{ need(20); font('bold',11,INK); doc.text(T(t),M,y); y+=2.4; doc.setFillColor(...GREEN); doc.rect(M,y,18,0.9,'F'); y+=6.5; };
+  /* resumen */
+  title('Resumen del mes');
+  const line=(lab,val,sign,bold)=>{ need(8); font(bold?'bold':'normal',bold?10:9.5,INK); doc.text(T(lab),M+3,y+4.6); doc.text((sign||'')+(sign?' ':'')+P(val),R-3,y+4.6,{align:'right'}); y+=7.4; doc.setDrawColor(...LINE); doc.setLineWidth(0.2); doc.line(M,y,R,y); };
+  line('Saldo inicial de caja (al empezar '+mes+')',ini,'',true);
+  line('Entradas: dinero que ingresó',tIn,'+');
+  line('Salidas: pagos a Laura',tL,'-');
+  line('Salidas: pagos a Diego',tD,'-');
+  line('Salidas: compras y otros gastos',tC,'-');
+  if(tR) line('Salidas: reembolsos a socios',tR,'-');
+  y+=3; need(16);
+  doc.setFillColor(...DARK); doc.roundedRect(M,y,R-M,14,1.5,1.5,'F');
+  font('normal',9,[210,210,204]); doc.text('Saldo al cierre de '+T(mes)+' (inicia '+T(mesSig)+')',M+4,y+8.6);
+  font('bold',15,GREEN); doc.text(P(fin),R-4,y+9.4,{align:'right'}); y+=21;
+  /* tablas */
+  function table(rows,totLabel,tot){
+    if(!rows.length){ font('italic',9,GRAY); doc.text('Sin movimientos en el mes.',M+3,y+3); y+=10; return; }
+    need(22); doc.setFillColor(...DARK); doc.rect(M,y,R-M,7,'F'); font('bold',7.5,[255,255,255]); doc.text('FECHA',M+3,y+4.8); doc.text('DETALLE',M+27,y+4.8); doc.text('VALOR',R-3,y+4.8,{align:'right'}); y+=7;
+    rows.forEach(r=>{ const ls=lines(r[1],R-M-27-42), h=Math.max(1,ls.length)*4.4+3.2;
+      if(y+h>LIM){ doc.addPage(); y=band(false)+2; }
+      font('normal',8.5,INK); doc.text(dmy(r[0]),M+3,y+4.6); ls.forEach((l,i)=>doc.text(l,M+27,y+4.6+i*4.4)); font('bold',8.8,INK); doc.text(P(r[2]),R-3,y+4.6,{align:'right'});
+      y+=h; doc.setDrawColor(...LINE); doc.setLineWidth(0.2); doc.line(M,y,R,y); });
+    need(10); doc.setFillColor(...SOFT); doc.rect(M,y,R-M,8,'F'); font('bold',9,INK); doc.text(T(totLabel),M+3,y+5.4); doc.text(P(tot),R-3,y+5.4,{align:'right'}); y+=13;
+  }
+  title('Entradas: dinero que ingresó · '+P(tIn));
+  table(inM.map(x=>[x.date,(x.type==='Cobro de cliente'?x.concept:x.type+' · '+x.concept),x.amount]),'Total de entradas',tIn);
+  title('Pagos a Laura · '+P(tL));
+  table(gL.map(x=>[x.date,detOut(x),x.amount]),'Total pagado a Laura',tL);
+  title('Pagos a Diego · '+P(tD));
+  table(gD.map(x=>[x.date,detOut(x),x.amount]),'Total pagado a Diego',tD);
+  title('Compras y otros gastos · '+P(tC));
+  table(gC.map(x=>[x.date,detOut(x),x.amount]),'Total de compras y otros gastos',tC);
+  if(gR.length){ title('Reembolsos a socios · '+P(tR)); table(gR.map(x=>[x.date,detOut(x),x.amount]),'Total de reembolsos',tR); }
+  /* notas */
+  const notes=[];
+  if(!S.caja) notes.push('No hay un saldo inicial de caja registrado: el saldo se calcula únicamente con las entradas y salidas registradas en el sistema.');
+  if(pers.length) notes.push('Además hay '+pers.length+' '+plural(pers.length,'gasto pagado','gastos pagados')+' con dinero personal de los socios por '+P(sum(pers,x=>x.amount))+'. No descuentan de la caja hasta que D&L los reembolse.');
+  notes.push('Los cobros de clientes se cuentan por el valor exacto recibido, en la fecha en que ingresó el dinero.');
+  need(10+notes.length*9); title('Notas'); font('normal',8.8,GRAY);
+  notes.forEach(n=>{ lines(n,R-M).forEach(l=>{ if(y>LIM){ doc.addPage(); y=band(false)+4; font('normal',8.8,GRAY); } doc.text(l,M,y); y+=4.4; }); y+=1.8; });
+  const n=doc.getNumberOfPages();
+  for(let i=1;i<=n;i++){
+    doc.setPage(i);
+    doc.setFillColor(...DARK); doc.rect(0,H-13,W,13,'F');
+    [[155,230,53],[109,194,26],[62,142,15]].forEach((c,k)=>{ doc.setFillColor(c[0],c[1],c[2]); doc.rect(k*W/3,H-14.2,W/3+0.3,1.2,'F'); });
+    font('normal',7.5,[200,200,194]);
+    const info=[E.nombre,E.nit&&('NIT '+E.nit),E.web,E.tel&&('Tel. '+E.tel),E.email].filter(Boolean).join('  ·  ');
+    doc.text(T(info),W/2,H-7.2,{align:'center',maxWidth:W-2*M});
+    font('normal',7,[150,150,144]); doc.text('Generado el '+dmy(todayS())+'  ·  Página '+i+' de '+n,W/2,H-3.4,{align:'center'});
+  }
+  return doc.output('blob');
+}
+async function pdfCaja(m){
+  let blob;
+  try{ blob=await buildCajaPdf(m); }
+  catch(err){ console.error(err); toast('No se pudo generar el PDF. Revise su conexión e intente de nuevo.'); return false; }
+  const fname='Informe-de-caja-'+m+'.pdf';
+  try{
+    if(S.dl){ await S.dl.save({filename:fname,data:blob}); }
+    else { const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=fname; document.body.appendChild(a); a.click(); setTimeout(()=>{ URL.revokeObjectURL(a.href); a.remove(); },4000); }
+    toast('Informe de '+monthLabel(m)+' listo.'); return true;
+  }catch(err){ console.error(err); toast('No se pudo guardar el PDF.'); return false; }
+}
+function informeForm(){
+  const cm=todayS().slice(0,7), f=firstOpMonth(), opts=[];
+  for(let y=Number(f.slice(0,4)), mo=Number(f.slice(5,7)); (y+'-'+pad(mo))<=cm; ){ opts.push(y+'-'+pad(mo)); mo++; if(mo>12){ mo=1; y++; } }
+  const sel=(S.gMonth&&opts.includes(S.gMonth))?S.gMonth:cm;
+  openModal({title:'Informe de caja en PDF',
+    body:'<p class="hint" style="margin:0">Descargue el informe del mes: qué dinero entró, qué dinero salió (pagos a Laura, pagos a Diego y compras y otros gastos) y el saldo para el cierre del mes.</p>'
+     +'<div class="fld" style="max-width:320px"><label for="inf-m">Mes del informe</label><select class="inp" id="inf-m">'+opts.slice().reverse().map(o=>'<option value="'+o+'"'+(o===sel?' selected':'')+'>'+esc(monthLabel(o))+'</option>').join('')+'</select></div>',
+    actions:[{label:'Cancelar',fn:()=>true},{label:'Descargar PDF',kind:'pri',fn:async()=>{ const ok=await pdfCaja($('#inf-m').value); return ok!==false; }}]});
+}
+const _drawCajaBase4=drawCaja;
+drawCaja=function(){
+  return _drawCajaBase4().replace('<button class="btn pri" data-act="add-exp" type="button">+ Registrar entrada o salida</button>',()=>'<button class="btn" data-informe="1" type="button">Descargar informe PDF</button><button class="btn pri" data-act="add-exp" type="button">+ Registrar entrada o salida</button>');
+};
+const _drawHomeBase4=drawHome;
+drawHome=function(){
+  const h=_drawHomeBase4(); if(S.view==='host') return h;
+  const t=secT('Ingresos');
+  return h.replace(t,()=>'<div style="display:flex;justify-content:space-between;align-items:flex-end;gap:12px;flex-wrap:wrap">'+t+'<button class="btn sm" data-informe="1" type="button" style="margin-bottom:10px">Descargar informe de caja (PDF)</button></div>');
+};
+document.addEventListener('click',e=>{ const b=e.target.closest&&e.target.closest('[data-informe]'); if(b&&$('#app').contains(b)) informeForm(); });
