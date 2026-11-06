@@ -758,17 +758,18 @@ function teamChart(year){
   S.exps.forEach(e=>{ if(isPend(e)||isIn(e)||!e.date||e.date.slice(0,4)!==year) return; const i=Number(e.date.slice(5,7))-1; if(e.kind==='laura') L[i]+=e.amount; else if(e.kind==='diego') D[i]+=e.amount; });
   const pend=sum(S.exps.filter(e=>isPend(e)&&(e.kind==='laura'||e.kind==='diego')&&(e.date||'').slice(0,4)===year),e=>e.amount);
   const tl=sum(L,x=>x), td=sum(D,x=>x), mx=Math.max(1,...L,...D);
+  let s0=0; for(let i=0;i<12;i++){ if(L[i]||D[i]){ s0=i; break; } }
   const mag=Math.pow(10,Math.floor(Math.log10(mx/4))), step=[1,2,2.5,5,10].map(k=>k*mag).find(v=>v*4>=mx), top=step*4;
   const legend=(c,t,v)=>'<span style="display:inline-flex;align-items:center;gap:6px"><span style="width:11px;height:11px;border-radius:3px;background:'+c+';display:inline-block"></span><b>'+t+'</b> '+money(v)+'</span>';
   let grid='', cols='';
   for(let i=0;i<=4;i++){ const pc=i*25; grid+='<div style="position:absolute;left:0;right:0;bottom:'+pc+'%;border-top:1px solid var(--line)"></div><div style="position:absolute;left:-46px;width:38px;text-align:right;bottom:calc('+pc+'% - 7px);font-size:11px;color:var(--muted)">'+mCorto(step*i)+'</div>'; }
-  for(let i=0;i<12;i++){
+  for(let i=s0;i<12;i++){
     const nm=MESES[i].charAt(0).toUpperCase()+MESES[i].slice(1,3);
-    const bar=(v,col,who)=>v?'<div title="'+who+' · '+MESES[i]+': '+esc(money(v))+'" style="width:min(24px,38%);height:'+Math.max(2,v/top*100)+'%;background:'+col+';border-radius:5px 5px 0 0"></div>':'';
+    const bar=(v,col,who)=>v?'<div title="'+who+' · '+MESES[i]+': '+esc(money(v))+'" style="width:min(40px,38%);height:'+Math.max(2,v/top*100)+'%;background:'+col+';border-radius:5px 5px 0 0"></div>':'';
     cols+='<div style="flex:1;min-width:0;display:flex;align-items:flex-end;justify-content:center;gap:4px;height:100%">'+bar(L[i],'var(--accent)','Laura')+bar(D[i],'var(--info)','Diego')+'</div>';
   }
   let foot='';
-  for(let i=0;i<12;i++){
+  for(let i=s0;i<12;i++){
     const nm=MESES[i].charAt(0).toUpperCase()+MESES[i].slice(1,3);
     foot+='<div style="flex:1;min-width:0;text-align:center;font-size:12px"><div style="color:var(--muted);font-weight:600">'+nm+'</div><div class="tc-v" style="color:var(--accent-ink);font-weight:700;font-size:11px;min-height:15px">'+(L[i]?mCorto(L[i]):'')+'</div><div class="tc-v" style="color:var(--info);font-weight:700;font-size:11px;min-height:15px">'+(D[i]?mCorto(D[i]):'')+'</div></div>';
   }
