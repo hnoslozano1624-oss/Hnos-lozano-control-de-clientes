@@ -293,10 +293,11 @@ billForm=function(b){
   box.innerHTML='<hr class="hr"><div class="f3"><div class="fld"><label for="b-cur">Moneda de cobro</label><select class="inp" id="b-cur"><option value="COP">Pesos colombianos (COP)</option><option value="USD">Dólares (USD)</option></select></div>'
     +'<div class="fld" id="b-rate-f"><label for="b-rate">TRM (pesos por 1 USD)</label><input class="inp num" id="b-rate" inputmode="decimal" placeholder="Ej. 3.182,99"></div>'
     +'<div class="fld" id="b-trm-f"><span class="lab">&nbsp;</span><button class="btn sm" id="b-trm" type="button">Consultar TRM del día</button></div></div>'
+    +'<div class="fld" id="b-rd-f" style="max-width:240px"><label for="b-rdate">Fecha de la TRM</label><input class="inp" id="b-rdate" type="date"></div>'
     +'<div class="hint" id="b-usd-hint"></div>';
   dateFld.closest('.fld').insertAdjacentElement('afterend',box);
-  const cur=$('#b-cur'), rate=$('#b-rate'), hint=$('#b-usd-hint');
-  cur.value=BF.cur;
+  const cur=$('#b-cur'), rate=$('#b-rate'), hint=$('#b-usd-hint'), rdate=$('#b-rdate');
+  cur.value=BF.cur; rdate.value=BF.rateDate||todayS();
   if(BF.rate) rate.value=String(BF.rate).replace('.',',');
   /* convierte los valores de los servicios cuando cambia la moneda y ya hay TRM */
   const sync=()=>{
@@ -308,6 +309,7 @@ billForm=function(b){
   const paint=()=>{
     const usd=BF.cur==='USD';
     $('#b-rate-f').style.display=usd?'':'none'; $('#b-trm-f').style.display=usd?'':'none';
+    $('#b-rd-f').style.display=(usd&&BF.rateSrc!=='trm')?'':'none';
     if(!usd){ hint.textContent='El documento se emite en pesos colombianos.'; return; }
     const src=BF.rateSrc==='trm'&&BF.rate?' TRM oficial vigente del '+fmtD(BF.rateFrom||BF.date)+' al '+fmtD(BF.rateTo||BF.date)+' (Superfinanciera).':(BF.rate?' Tasa ingresada manualmente.':' Consulte o escriba la TRM para convertir los valores a dólares.');
     hint.innerHTML='Escriba el valor de cada servicio en dólares; la TRM se usa para mostrar el equivalente en pesos.'+src;
@@ -323,7 +325,8 @@ billForm=function(b){
     BF.cur=cur.value; paint();
     if(BF.cur==='USD'&&!(Number(BF.rate)>0)) getTrm(true); else { sync(); paintBillItems(); }
   });
-  rate.addEventListener('input',()=>{ BF.rate=parseDec(rate.value); BF.rateSrc='manual'; paint(); updateBillTot(); });
+  rate.addEventListener('input',()=>{ BF.rate=parseDec(rate.value); if(BF.rateSrc!=='manual') rdate.value=todayS(); BF.rateSrc='manual'; BF.rateDate=rdate.value||todayS(); paint(); updateBillTot(); });
+  rdate.addEventListener('change',()=>{ BF.rateDate=rdate.value||todayS(); });
   rate.addEventListener('change',()=>{ sync(); });
   $('#b-trm').addEventListener('click',()=>getTrm(false));
   $('#b-date').addEventListener('change',()=>{ if(BF.cur==='USD'&&BF.rateSrc==='trm') getTrm(true); });
@@ -419,7 +422,7 @@ buildBillPdf=async function(b){
   });
   y+=5; need(24);
   doc.setFillColor(...DARK); doc.roundedRect(112,y,R-112,10,1.5,1.5,'F'); font('normal',9,[210,210,204]); doc.text('Total a pagar',116,y+6.4); font('bold',12,GREEN); doc.text(U(totalUsd),R-4,y+6.8,{align:'right'}); y+=16;
-  const eq='Valor equivalente: $ '+new Intl.NumberFormat('es-CO').format(totalCop)+' COP, liquidado a la TRM de $ '+trmTxt(RT)+' por dólar'+(b.rateSrc==='trm'?' (TRM oficial vigente del '+longDate(b.rateFrom||b.rateDate,'es')+(b.rateTo&&b.rateTo!==b.rateFrom?' al '+longDate(b.rateTo,'es'):'')+', Superfinanciera de Colombia).':' (tasa acordada el '+longDate(b.rateDate||b.date,'es')+').');
+  const eq='Valor equivalente: $ '+new Intl.NumberFormat('es-CO').format(totalCop)+' COP, liquidado a la TRM de $ '+trmTxt(RT)+' por dólar'+(b.rateSrc==='trm'?' (TRM oficial vigente del '+longDate(b.rateFrom||b.rateDate,'es')+(b.rateTo&&b.rateTo!==b.rateFrom?' al '+longDate(b.rateTo,'es'):'')+', Superfinanciera de Colombia).':' (TRM del '+longDate(b.rateDate||b.date,'es')+').');
   need(12); font('italic',8.5,GRAY); lines(eq,R-M).forEach(l=>{ doc.text(l,M,y); y+=4.2; }); y+=3;
   if(b.notes){ need(20); label('Observaciones',M,y); y+=5; font('normal',9,INK); lines(b.notes,R-M).forEach(l=>{ if(y>LIM){ doc.addPage(); y=band(false)+4; font('normal',9,INK); } doc.text(l,M,y); y+=4.5; }); y+=3; }
   const pago=[E.banco&&('Banco: '+E.banco+(E.tipoCta?' · '+E.tipoCta:'')),E.numCta&&('N.º de cuenta: '+E.numCta),E.titCta&&('Titular: '+E.titCta),E.pagoExtra].filter(Boolean);
