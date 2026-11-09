@@ -232,7 +232,15 @@ document.addEventListener('keydown',e=>{ if((e.key==='Enter'||e.key===' ')&&e.ta
 const r2=n=>Math.round((Number(n)||0)*100)/100;
 const trmTxt=n=>new Intl.NumberFormat('es-CO',{minimumFractionDigits:2,maximumFractionDigits:2}).format(Number(n)||0);
 const decTxt=n=>new Intl.NumberFormat('es-CO',{maximumFractionDigits:2}).format(Number(n)||0);
-const parseDec=v=>{ v=String(v||'').trim(); if(v.includes(',')) v=v.replace(/\./g,'').replace(',','.'); return Number(v)||0; };
+/* admite 3.294,03 · 3,294.03 · 3294,03 · 3294.03: el último separador es el decimal; un solo punto con 3 dígitos se toma como miles */
+const parseDec=v=>{
+  v=String(v||'').trim().replace(/[^\d.,]/g,''); if(!v) return 0;
+  const lc=v.lastIndexOf(','), ld=v.lastIndexOf('.');
+  if(lc>=0&&ld>=0){ const dec=lc>ld?',':'.', th=dec===','?'.':','; v=v.split(th).join('').replace(dec,'.'); }
+  else if(lc>=0){ v=v.match(/,/g).length>1?v.split(',').join(''):v.replace(',','.'); }
+  else if(ld>=0){ if(v.match(/\./g).length>1||/\.\d{3}$/.test(v)) v=v.split('.').join(''); }
+  return Number(v)||0;
+};
 /* documentos nuevos: los valores de los servicios están en USD (usdPrices); los de la primera versión están en COP y se convierten con la TRM */
 const isUsdBill=b=>b&&b.cur==='USD'&&Number(b.rate)>0;
 const unitUsd=(b,it)=>b.usdPrices?r2(it.price):r2((Number(it.price)||0)/Number(b.rate));
@@ -336,6 +344,7 @@ const _saveBillBase=saveBill;
 saveBill=async function(b,andPdf){
   const usd=BF.cur==='USD';
   if(usd&&!(Number(BF.rate)>0)){ toast('Indique la TRM para cobrar en dólares.'); return false; }
+  if(usd&&Number(BF.rate)<500){ toast('La TRM parece incorrecta ('+trmTxt(BF.rate)+'). Escríbala como 3294,03 o 3.294,03.'); return false; }
   if(usd&&BF.pcur!=='USD'){ toast('Espere a que se convierta el valor a dólares e intente de nuevo.'); return false; }
   const extra=usd?{cur:'USD',usdPrices:true,rate:Number(BF.rate),rateSrc:BF.rateSrc||'manual',rateDate:BF.rateDate||BF.date||todayS(),rateFrom:BF.rateFrom||'',rateTo:BF.rateTo||''}:{cur:'COP',usdPrices:false,rate:null,rateSrc:'',rateDate:'',rateFrom:'',rateTo:''};
   const sd=saveDoc;
